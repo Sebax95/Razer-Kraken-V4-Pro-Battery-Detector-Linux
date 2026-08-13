@@ -1,0 +1,95 @@
+#!/usr/bin/env python3
+"""Lee la batería del Razer Kraken V4 Pro vía hidraw.
+
+Protocolo (capturado de Synapse con usbmon, 2026-08-12):
+  comando  (64B, report ID 0x02): 02 00 60 00 00 00 04 00 | 00 TT CC 00 | ...
+  respuesta (64B, interrupt IN):  02 02 60 00 00 00 LL 00 | 00 TT CC 01 | VV BB ...
+  TT = 0x80 (dock -> auricular inalámbrico) o 0x00 (auricular por cable)
+  CC = comando: 0x21 batería (BB = 0-100, 0xff = sin link RF),
+       0x2a estado de carga (BB = 01 cargando), 0x20 link RF (BB = 01 conectado)
+  VV = flag de dato válido (siempre 01 con respuesta buena, no confundir con carga)
+"""
+import glob
+import os
+import select
+import sys
+import time
+
+VID = "1532"
+PID_DOCK = "0568"
+PID_WIRED = "0567"
+CMD_BATTERY = 0x21
+CMD_CHARGING = 0x2A
+
+
+def find_hidraws(pid):
+    """Devuelve los /dev/hidraw* que pertenecen al VID:PID dado."""
+    nodes = []
+    for path in sorted(glob.glob("/sys/class/hidraw/hidraw*")):
+        try:
+            uevent = open(os.path.join(path, "device", "uevent")).read()
+        except OSError:
+            continue
+        if f"HID_ID=0003:0000{VID}:0000{pid}".casefold() in uevent.casefold():
+            nodes.append("/dev/" + os.path.basename(path))
+    return nodes
+
+
+def query(node, target, cmdid):
+    """Manda un comando y espera la respuesta con su mismo ID (byte 10)."""
+    cmd = bytearray(64)
+    cmd[0] = 0x02          # report ID
+    cmd[2] = 0x60
+    cmd[6] = 0x04          # largo de payload
+    cmd[9] = target        # 0x80 = vía dock (RF), 0x00 = directo
+    cmd[10] = cmdid
+    fd = os.open(node, os.O_RDWR | os.O_NONBLOCK)
+    try:
+        os.write(fd, bytes(cmd))
+        deadline = time.monotonic() + 2.0
+        while time.monotonic() < deadline:
+            r, _, _ = select.select([fd], [], [], deadline - time.monotonic())
+            if not r:
+                break
+            data = os.read(fd, 64)
+            # filtra los frames periódicos de estado: queremos el eco del comando
+            if len(data) >= 14 and data[0] == 0x02 and data[10] == cmdid:
+                return data[13]
+    finally:
+        os.close(fd)
+    return None
+
+
+def main():
+    wired = find_hidraws(PID_WIRED)
+    dock = find_hidraws(PID_DOCK)
+    if not wired and not dock:
+        print("No se encontró el Kraken V4 Pro (ni dock ni cable).", file=sys.stderr)
+        return 1
+
+    # Con cable conectado se consulta directo; si no, vía dock por RF.
+    attempts = [(n, 0x00, "cable") for n in wired] + [(n, 0x80, "dock/RF") for n in dock]
+    for node, target, via in attempts:
+        try:
+            level = query(node, target, CMD_BATTERY)
+        except PermissionError:
+            print(f"Sin permiso sobre {node} (falta la regla udev).", file=sys.stderr)
+            continue
+        except OSError:
+            continue
+        if level is None or level == 0xFF:
+            continue  # el dock responde 0xff cuando no tiene link con el auricular
+        try:
+            charging = query(node, target, CMD_CHARGING)
+        except OSError:
+            charging = None
+        state = "cargando" if charging == 0x01 else "en uso"
+        print(f"Batería: {level}% ({state}, vía {via})")
+        return 0
+
+    print("El auricular no respondió (¿apagado o fuera de alcance del dock?).", file=sys.stderr)
+    return 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())
