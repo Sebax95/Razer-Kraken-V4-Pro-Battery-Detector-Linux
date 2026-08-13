@@ -10,6 +10,7 @@ Protocol (captured from Synapse with usbmon, 2026-08-12):
   VV = data-valid flag (always 01 on a good reply; NOT the charging state)
 """
 import glob
+import json
 import os
 import select
 import sys
@@ -60,12 +61,20 @@ def query(node, target, cmdid):
     return None
 
 
+def fail(as_json, message):
+    if as_json:
+        print(json.dumps({"error": message}))
+    else:
+        print(message, file=sys.stderr)
+    return 1
+
+
 def main():
+    as_json = "--json" in sys.argv[1:]
     wired = find_hidraws(PID_WIRED)
     dock = find_hidraws(PID_DOCK)
     if not wired and not dock:
-        print("Razer Kraken V4 Pro not found (neither dock nor cable).", file=sys.stderr)
-        return 1
+        return fail(as_json, "Razer Kraken V4 Pro not found (neither dock nor cable).")
 
     # Query directly while the cable is plugged in; otherwise via the dock (RF).
     attempts = [(n, 0x00, "cable") for n in wired] + [(n, 0x80, "dock/RF") for n in dock]
@@ -83,12 +92,14 @@ def main():
             charging = query(node, target, CMD_CHARGING)
         except OSError:
             charging = None
-        state = "charging" if charging == 0x01 else "discharging"
-        print(f"Battery: {level}% ({state}, via {via})")
+        if as_json:
+            print(json.dumps({"battery": level, "charging": charging == 0x01, "via": via}))
+        else:
+            state = "charging" if charging == 0x01 else "discharging"
+            print(f"Battery: {level}% ({state}, via {via})")
         return 0
 
-    print("The headset did not respond (powered off or out of dock range?).", file=sys.stderr)
-    return 1
+    return fail(as_json, "The headset did not respond (powered off or out of dock range?).")
 
 
 if __name__ == "__main__":

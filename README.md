@@ -7,7 +7,13 @@ over the USB-C cable.
 ```
 $ kraken-battery
 Battery: 84% (discharging, via dock/RF)
+
+$ kraken-battery --json
+{"battery": 84, "charging": false, "via": "dock/RF"}
 ```
+
+The `--json` output is meant for status bars and scripts (waybar, quickshell,
+polybar…); on failure it prints `{"error": "..."}` and exits non-zero.
 
 As of August 2026, OpenRazer has no support for this device (dock `1532:0568`,
 headset `1532:0567`) and the kernel exposes no standard HID battery interface
