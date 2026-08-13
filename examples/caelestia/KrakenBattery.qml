@@ -16,6 +16,9 @@ Singleton {
     property int _percentage: 0
     property bool _charging: false
     property string _via: ""
+    // tras conectar/desconectar el cable, el auricular tarda unos segundos en
+    // re-engancharse por RF al dock: reintentar antes de dar por perdido
+    property int _retriesLeft: 0
 
     Process {
         id: proc
@@ -23,6 +26,7 @@ Singleton {
         command: [Quickshell.env("HOME") + "/.local/bin/kraken-battery", "--json"]
         stdout: StdioCollector {
             onStreamFinished: {
+                let ok = false;
                 try {
                     const info = JSON.parse(text);
                     if (typeof info.battery === "number") {
@@ -30,11 +34,18 @@ Singleton {
                         root._charging = !!info.charging;
                         root._via = info.via ?? "";
                         root._available = true;
+                        ok = true;
+                    }
+                } catch (e) {}
+                if (!ok) {
+                    if (root._retriesLeft > 0) {
+                        root._retriesLeft--;
+                        retry.restart();
                     } else {
                         root._available = false;
                     }
-                } catch (e) {
-                    root._available = false;
+                } else {
+                    root._retriesLeft = 0;
                 }
             }
         }
@@ -58,6 +69,16 @@ Singleton {
 
         // le da tiempo al dispositivo a terminar de enumerar antes de consultar
         interval: 1500
+        onTriggered: {
+            root._retriesLeft = 4;
+            proc.running = true;
+        }
+    }
+
+    Timer {
+        id: retry
+
+        interval: 3000
         onTriggered: proc.running = true
     }
 
