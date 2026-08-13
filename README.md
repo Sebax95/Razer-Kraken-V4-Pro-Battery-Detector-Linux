@@ -6,7 +6,7 @@ over the USB-C cable.
 
 ```
 $ kraken-battery
-Batería: 84% (en uso, vía dock/RF)
+Battery: 84% (discharging, via dock/RF)
 ```
 
 As of August 2026, OpenRazer has no support for this device (dock `1532:0568`,

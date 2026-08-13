@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
-"""Lee la batería del Razer Kraken V4 Pro vía hidraw.
+"""Read the battery level of a Razer Kraken V4 Pro via hidraw.
 
-Protocolo (capturado de Synapse con usbmon, 2026-08-12):
-  comando  (64B, report ID 0x02): 02 00 60 00 00 00 04 00 | 00 TT CC 00 | ...
-  respuesta (64B, interrupt IN):  02 02 60 00 00 00 LL 00 | 00 TT CC 01 | VV BB ...
-  TT = 0x80 (dock -> auricular inalámbrico) o 0x00 (auricular por cable)
-  CC = comando: 0x21 batería (BB = 0-100, 0xff = sin link RF),
-       0x2a estado de carga (BB = 01 cargando), 0x20 link RF (BB = 01 conectado)
-  VV = flag de dato válido (siempre 01 con respuesta buena, no confundir con carga)
+Protocol (captured from Synapse with usbmon, 2026-08-12):
+  command  (64B, report ID 0x02): 02 00 60 00 00 00 04 00 | 00 TT CC 00 | ...
+  response (64B, interrupt IN):   02 02 60 00 00 00 LL 00 | 00 TT CC 01 | VV BB ...
+  TT = 0x80 (dock -> wireless headset) or 0x00 (wired headset)
+  CC = command: 0x21 battery (BB = 0-100, 0xff = no RF link),
+       0x2a charging state (BB = 01 charging), 0x20 RF link (BB = 01 linked)
+  VV = data-valid flag (always 01 on a good reply; NOT the charging state)
 """
 import glob
 import os
@@ -23,7 +23,7 @@ CMD_CHARGING = 0x2A
 
 
 def find_hidraws(pid):
-    """Devuelve los /dev/hidraw* que pertenecen al VID:PID dado."""
+    """Return the /dev/hidraw* nodes belonging to the given VID:PID."""
     nodes = []
     for path in sorted(glob.glob("/sys/class/hidraw/hidraw*")):
         try:
@@ -36,12 +36,12 @@ def find_hidraws(pid):
 
 
 def query(node, target, cmdid):
-    """Manda un comando y espera la respuesta con su mismo ID (byte 10)."""
+    """Send a command and wait for the response carrying the same ID (byte 10)."""
     cmd = bytearray(64)
     cmd[0] = 0x02          # report ID
     cmd[2] = 0x60
-    cmd[6] = 0x04          # largo de payload
-    cmd[9] = target        # 0x80 = vía dock (RF), 0x00 = directo
+    cmd[6] = 0x04          # payload length
+    cmd[9] = target        # 0x80 = via dock (RF), 0x00 = direct
     cmd[10] = cmdid
     fd = os.open(node, os.O_RDWR | os.O_NONBLOCK)
     try:
@@ -52,7 +52,7 @@ def query(node, target, cmdid):
             if not r:
                 break
             data = os.read(fd, 64)
-            # filtra los frames periódicos de estado: queremos el eco del comando
+            # skip the dock's periodic status frames: match our command's echo
             if len(data) >= 14 and data[0] == 0x02 and data[10] == cmdid:
                 return data[13]
     finally:
@@ -64,30 +64,30 @@ def main():
     wired = find_hidraws(PID_WIRED)
     dock = find_hidraws(PID_DOCK)
     if not wired and not dock:
-        print("No se encontró el Kraken V4 Pro (ni dock ni cable).", file=sys.stderr)
+        print("Razer Kraken V4 Pro not found (neither dock nor cable).", file=sys.stderr)
         return 1
 
-    # Con cable conectado se consulta directo; si no, vía dock por RF.
+    # Query directly while the cable is plugged in; otherwise via the dock (RF).
     attempts = [(n, 0x00, "cable") for n in wired] + [(n, 0x80, "dock/RF") for n in dock]
     for node, target, via in attempts:
         try:
             level = query(node, target, CMD_BATTERY)
         except PermissionError:
-            print(f"Sin permiso sobre {node} (falta la regla udev).", file=sys.stderr)
+            print(f"No permission on {node} (udev rule missing).", file=sys.stderr)
             continue
         except OSError:
             continue
         if level is None or level == 0xFF:
-            continue  # el dock responde 0xff cuando no tiene link con el auricular
+            continue  # the dock answers 0xff when it has no RF link to the headset
         try:
             charging = query(node, target, CMD_CHARGING)
         except OSError:
             charging = None
-        state = "cargando" if charging == 0x01 else "en uso"
-        print(f"Batería: {level}% ({state}, vía {via})")
+        state = "charging" if charging == 0x01 else "discharging"
+        print(f"Battery: {level}% ({state}, via {via})")
         return 0
 
-    print("El auricular no respondió (¿apagado o fuera de alcance del dock?).", file=sys.stderr)
+    print("The headset did not respond (powered off or out of dock range?).", file=sys.stderr)
     return 1
 
 
