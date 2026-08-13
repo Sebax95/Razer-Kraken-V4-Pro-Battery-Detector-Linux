@@ -6,6 +6,8 @@ and red at ≤10%, with a Synapse-style hover popout (progress ring, percentage,
 and a bolt badge while charging). Updates every 60 s, plus instantly on USB
 plug/unplug via `udevadm monitor`.
 
+![Demo: hover popout with battery ring, bolt badge appearing on plug and disappearing on unplug](demo.gif)
+
 Requires `kraken-battery` installed at `~/.local/bin/` (see the main README).
 
 ## Files
