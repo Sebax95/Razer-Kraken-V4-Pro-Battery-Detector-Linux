@@ -1,0 +1,136 @@
+#!/usr/bin/env python3
+"""Set the RGB lighting of a Razer Kraken V4 Pro via hidraw.
+
+Two paths, both captured from Synapse with usbmon (2026-08-13):
+
+  Wired (USB cable direct to the headset, PID 0567, if05) -- PREFERRED:
+    Plain write(), NO handshake. Confirmed reliable across real cable
+    unplug/replug cycles (tested repeatedly). IMPORTANT: never send the
+    Feature Report handshake (see enable_lighting below) on this
+    interface -- doing so was found to corrupt it into only lighting
+    one of the ring's ~10 LED zones instead of the whole ring, and
+    that corruption persists until the cable is unplugged and replugged.
+    Header TT byte (offset 9) = 0x00.
+
+  Dock/RF (via the dock, PID 0568, if04) -- fallback when not wired:
+    Needs the one-time Feature Report handshake (HIDIOCSFEATURE) below
+    before each write, or the device silently ignores it and stays on
+    its hardware-default color. Header TT byte = 0x80. Does NOT
+    reliably recover after the *headset* (not dock) is power-cycled --
+    known limitation, see project memory; the wired path exists
+    specifically to route around this when charging/wired anyway.
+
+Both share the same 64-byte Output Report ID 0x02 body: bytes 0-14 are
+a fixed header (only byte 9 differs), then an R,G,B triplet tiled from
+byte 15 to byte 63.
+
+Usage:
+  kraken-rgb R G B     # e.g. kraken-rgb 255 0 0
+  kraken-rgb off
+  kraken-rgb toggle    # alternates between off and the last color used
+"""
+import glob
+import os
+import sys
+import time
+import fcntl
+
+STATE_FILE = os.path.expanduser("~/.cache/kraken-rgb-state")
+DEFAULT_ON_COLOR = (0, 200, 255)
+
+
+def find_wired_node():
+    for path in glob.glob("/dev/input/by-id/*Razer_Inc_Razer_Kraken_V4_Pro*if05-hidraw"):
+        return os.path.realpath(path)
+    return None
+
+
+def find_dock_node():
+    for path in glob.glob("/dev/input/by-id/*Kraken_V4_Pro*if04-hidraw"):
+        return os.path.realpath(path)
+    return None
+
+
+def _hidiocsfeature(size):
+    return (3 << 30) | (size << 16) | (ord("H") << 8) | 0x06
+
+
+def _set_feature(fd, data):
+    fcntl.ioctl(fd, _hidiocsfeature(len(data)), bytes(data))
+
+
+def enable_lighting(fd):
+    """Dock/RF-only -- NEVER call this on the wired (if05) node, see docstring."""
+    for page in range(9):
+        _set_feature(fd, bytes([0x32, page, 0x00]))
+    _set_feature(fd, bytes.fromhex("3601"))
+    _set_feature(fd, bytes.fromhex("35010000080000000000"))
+    time.sleep(0.34)
+    _set_feature(fd, bytes.fromhex("3600"))
+    _set_feature(fd, bytes.fromhex("3501000008000090fed5"))
+
+
+def build_frame(tt, r, g, b):
+    buf = bytearray(64)
+    buf[0:15] = bytes.fromhex("020060000000210f03") + bytes([tt]) + bytes(4) + bytes([0x08])
+    for i in range(15, 64):
+        buf[i] = (r, g, b)[(i - 15) % 3]
+    return bytes(buf)
+
+
+def send_color(r, g, b):
+    wired = find_wired_node()
+    if wired is not None:
+        fd = os.open(wired, os.O_RDWR)
+        try:
+            os.write(fd, build_frame(0x00, r, g, b))
+        finally:
+            os.close(fd)
+        return "cable"
+
+    dock = find_dock_node()
+    if dock is not None:
+        fd = os.open(dock, os.O_RDWR)
+        try:
+            enable_lighting(fd)
+            os.write(fd, build_frame(0x80, r, g, b))
+        finally:
+            os.close(fd)
+        return "dock/RF"
+
+    return None
+
+
+def main():
+    args = sys.argv[1:]
+    if len(args) == 3:
+        r, g, b = (int(x) for x in args)
+    elif args == ["off"]:
+        r, g, b = 0, 0, 0
+    elif args == ["toggle"]:
+        try:
+            with open(STATE_FILE) as f:
+                state = f.read().strip()
+        except FileNotFoundError:
+            state = "off"
+        if state in ("off", "0,0,0"):
+            r, g, b = DEFAULT_ON_COLOR
+        else:
+            r, g, b = 0, 0, 0
+    else:
+        print(__doc__, file=sys.stderr)
+        return 1
+
+    via = send_color(r, g, b)
+    if via is None:
+        print("Kraken V4 Pro no encontrado (ni cable ni dock).", file=sys.stderr)
+        return 1
+
+    with open(STATE_FILE, "w") as f:
+        f.write(f"{r},{g},{b}")
+    print(f"RGB: {r},{g},{b} (via {via})")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

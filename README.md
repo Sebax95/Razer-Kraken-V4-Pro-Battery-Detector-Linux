@@ -1,8 +1,8 @@
 # kraken-v4-pro-battery
 
-Read the battery level of the **Razer Kraken V4 Pro** headset on Linux, with no
-Synapse and no OpenRazer required. Works both wirelessly (through the dock) and
-over the USB-C cable.
+Read the battery level and control the RGB lighting of the **Razer Kraken V4
+Pro** headset on Linux, with no Synapse and no OpenRazer required. Works both
+wirelessly (through the dock) and over the USB-C cable.
 
 ```
 $ kraken-battery
@@ -10,13 +10,18 @@ Battery: 84% (discharging, via dock/RF)
 
 $ kraken-battery --json
 {"battery": 84, "charging": false, "via": "dock/RF"}
+
+$ kraken-rgb 255 0 0
+RGB: 255,0,0 (via cable)
+$ kraken-rgb toggle
+RGB: 0,0,0 (via cable)
 ```
 
 The `--json` output is meant for status bars and scripts (waybar, quickshell,
 polybar…); on failure it prints `{"error": "..."}` and exits non-zero. See
 [`examples/caelestia/`](examples/caelestia/) for a ready-made bar widget for
 the Caelestia shell (icon + Synapse-style popout with instant plug/unplug
-updates).
+updates, plus color swatches and an on/off toggle).
 
 As of August 2026, OpenRazer has no support for this device (dock `1532:0568`,
 headset `1532:0567`) and the kernel exposes no standard HID battery interface
@@ -27,7 +32,7 @@ a Windows VM with the dock passed through).
 ## Install
 
 ```sh
-install -m 755 kraken-battery ~/.local/bin/
+install -m 755 kraken-battery kraken-rgb ~/.local/bin/
 sudo install -m 644 70-kraken-battery.rules /etc/udev/rules.d/
 sudo udevadm control --reload
 sudo udevadm trigger --subsystem-match=hidraw --action=add
@@ -67,6 +72,38 @@ response: 02 02 60 00 00 00 LL 00 | 00 TT CC 01 | VV BB …
 Validated byte-for-byte against Synapse: a fresh Synapse session querying the
 wireless headset displayed exactly the value returned by command `0x21`
 (`0x64` = 100%), and both readings tracked together as the battery drained.
+
+## RGB lighting
+
+`kraken-rgb` sets the earcup RGB ring to a solid color, or turns it off, using
+two different paths depending on how the headset is connected:
+
+- **Wired (USB-C cable)** — preferred. A plain 64-byte HID output report
+  (report ID `0x02`) to the headset's own `hidraw` interface (`1532:0567`),
+  no setup required. Confirmed reliable across real cable unplug/replug
+  cycles.
+- **Dock/RF (wireless)** — fallback when no cable is connected. Same report,
+  sent to the dock (`1532:0568`) instead, but the dock silently ignores it
+  unless a one-time HID *Feature* report handshake (`HIDIOCSFEATURE`, not a
+  plain write) has been sent first on the current USB connection. That
+  handshake does **not** survive the *headset* itself being power-cycled
+  (only a fresh dock-side USB connection resets it) — a real limitation of
+  the dock's firmware, not something this script can currently route around
+  for RF-only setups.
+
+```
+02 00 60 00 00 00 21 0f 03 TT 00 00 00 00 08 | RR GG BB RR GG BB …
+```
+
+`TT` (byte 9) is `0x00` for the wired path, `0x80` for the dock. The header is
+otherwise identical; the R,G,B triplet is tiled from byte 15 to the end of
+the report.
+
+**Gotcha if you're extending this:** never send the Feature report handshake
+on the wired interface. Doing so corrupts it into only lighting one of the
+ring's ~10 individually-addressable LED zones instead of the whole ring, and
+that persists until the cable is unplugged and replugged — it isn't
+reversible in software. The handshake is dock-only.
 
 ## Notes
 

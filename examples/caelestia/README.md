@@ -3,18 +3,23 @@
 Bar widget for [caelestia-dots/shell](https://github.com/caelestia-dots/shell)
 (Quickshell): a headphones icon in the status column that turns orange at ≤20%
 and red at ≤10%, with a Synapse-style hover popout (progress ring, percentage,
-and a bolt badge while charging). Updates every 60 s, plus instantly on USB
-plug/unplug via `udevadm monitor`.
+and a bolt badge while charging), plus a row of color swatches and an on/off
+toggle to control the RGB lighting. Battery updates every 60 s, plus instantly
+on USB plug/unplug via `udevadm monitor`.
 
 ![Demo: hover popout with battery ring, bolt badge appearing on plug and disappearing on unplug](demo.gif)
 
-Requires `kraken-battery` installed at `~/.local/bin/` (see the main README).
+Requires `kraken-battery` and `kraken-rgb` installed at `~/.local/bin/` (see
+the main README).
 
 ## Files
 
 - `KrakenBattery.qml` → copy to `services/` (singleton that polls
   `kraken-battery --json`)
-- `Kraken.qml` → copy to `modules/bar/popouts/` (the hover popout)
+- `KrakenRGB.qml` → copy to `services/` (singleton that fire-and-forgets
+  `kraken-rgb` calls)
+- `Kraken.qml` → copy to `modules/bar/popouts/` (the hover popout — battery
+  ring plus RGB swatches/toggle)
 
 ## Manual edits
 
