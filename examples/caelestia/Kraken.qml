@@ -11,7 +11,7 @@ Column {
 
     readonly property color levelColour: {
         if (KrakenBattery.percentage <= 10)
-            return Colours.palette.m3error;
+            return "#f44336";
         if (KrakenBattery.percentage <= 20)
             return "#ff9800";
         return Colours.palette.m3primary;
