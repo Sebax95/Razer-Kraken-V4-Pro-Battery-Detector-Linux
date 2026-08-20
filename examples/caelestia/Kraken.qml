@@ -45,10 +45,14 @@ Column {
         }
 
         StyledRect {
+            id: badge
+
+            readonly property bool fullyCharged: KrakenBattery.via === "cable" && KrakenBattery.percentage >= 100
+
             anchors.top: parent.top
             anchors.right: parent.right
 
-            visible: KrakenBattery.charging
+            visible: KrakenBattery.charging || fullyCharged
             implicitWidth: boltIcon.implicitHeight + Tokens.padding.extraSmall * 2
             implicitHeight: boltIcon.implicitHeight + Tokens.padding.extraSmall * 2
             radius: Tokens.rounding.full
@@ -58,9 +62,9 @@ Column {
                 id: boltIcon
 
                 anchors.centerIn: parent
-                text: "bolt"
+                text: badge.fullyCharged ? "check_circle" : "bolt"
                 fill: 1
-                color: root.levelColour
+                color: badge.fullyCharged ? "#4caf50" : root.levelColour
             }
         }
     }

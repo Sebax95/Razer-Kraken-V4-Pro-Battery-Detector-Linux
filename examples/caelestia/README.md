@@ -32,17 +32,41 @@ WrappedLoader {
     name: "krakenbattery"
     active: KrakenBattery.available
 
-    sourceComponent: MaterialIcon {
-        animate: true
-        text: "headphones"
-        color: {
-            if (KrakenBattery.percentage <= 10)
-                return "#f44336";
-            if (KrakenBattery.percentage <= 20)
-                return "#ff9800";
-            return root.colour;
+    sourceComponent: Item {
+        implicitWidth: headsetIcon.implicitWidth
+        implicitHeight: headsetIcon.implicitHeight
+
+        MaterialIcon {
+            id: headsetIcon
+
+            animate: true
+            text: "headphones"
+            color: {
+                if (KrakenBattery.percentage <= 10)
+                    return "#f44336";
+                if (KrakenBattery.percentage <= 20)
+                    return "#ff9800";
+                return root.colour;
+            }
+            fill: 1
         }
-        fill: 1
+
+        // Small dot badge while fully charged and still plugged in via cable
+        StyledRect {
+            visible: KrakenBattery.via === "cable" && KrakenBattery.percentage >= 100
+
+            anchors.right: parent.right
+            anchors.bottom: parent.bottom
+            anchors.rightMargin: -1
+            anchors.bottomMargin: -1
+
+            implicitWidth: 6
+            implicitHeight: 6
+            radius: Tokens.rounding.full
+            color: "#4caf50"
+            border.width: 1
+            border.color: Colours.tPalette.m3surface
+        }
     }
 }
 ```
