@@ -33,6 +33,7 @@ a Windows VM with the dock passed through).
 
 ```sh
 install -m 755 kraken-battery kraken-rgb ~/.local/bin/
+install -Dm 644 dock-recovery-sequence.hex ~/.local/share/kraken-rgb/dock-recovery-sequence.hex
 sudo install -m 644 70-kraken-battery.rules /etc/udev/rules.d/
 sudo udevadm control --reload
 sudo udevadm trigger --subsystem-match=hidraw --action=add
@@ -84,12 +85,13 @@ two different paths depending on how the headset is connected:
   cycles.
 - **Dock/RF (wireless)** — fallback when no cable is connected. Same report,
   sent to the dock (`1532:0568`) instead, but the dock silently ignores it
-  unless a one-time HID *Feature* report handshake (`HIDIOCSFEATURE`, not a
-  plain write) has been sent first on the current USB connection. That
-  handshake does **not** survive the *headset* itself being power-cycled
-  (only a fresh dock-side USB connection resets it) — a real limitation of
-  the dock's firmware, not something this script can currently route around
-  for RF-only setups.
+  after the *headset* has been power-cycled until it sees the same recovery
+  sequence Synapse sends on reconnect: `kraken-rgb` replays
+  [`dock-recovery-sequence.hex`](dock-recovery-sequence.hex) (140 commands,
+  captured from a real Synapse reconnect, ~20ms apart — sending them with no
+  delay floods the dock and only some land) before every dock-path write.
+  Adds ~3s but is fully reliable; confirmed across repeated real headset
+  power-cycles with no Synapse/Windows involved at all.
 
 ```
 02 00 60 00 00 00 21 0f 03 TT 00 00 00 00 08 | RR GG BB RR GG BB …

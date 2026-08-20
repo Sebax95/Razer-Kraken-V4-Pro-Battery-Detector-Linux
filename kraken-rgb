@@ -1,28 +1,33 @@
 #!/usr/bin/env python3
 """Set the RGB lighting of a Razer Kraken V4 Pro via hidraw.
 
-Two paths, both captured from Synapse with usbmon (2026-08-13):
+Two paths, both captured from Synapse with usbmon (2026-08-13/20):
 
   Wired (USB cable direct to the headset, PID 0567, if05) -- PREFERRED:
-    Plain write(), NO handshake. Confirmed reliable across real cable
-    unplug/replug cycles (tested repeatedly). IMPORTANT: never send the
-    Feature Report handshake (see enable_lighting below) on this
-    interface -- doing so was found to corrupt it into only lighting
-    one of the ring's ~10 LED zones instead of the whole ring, and
-    that corruption persists until the cable is unplugged and replugged.
-    Header TT byte (offset 9) = 0x00.
+    Plain write(), no setup needed. Confirmed reliable across real
+    cable unplug/replug cycles. Header TT byte (offset 9) = 0x00.
 
   Dock/RF (via the dock, PID 0568, if04) -- fallback when not wired:
-    Needs the one-time Feature Report handshake (HIDIOCSFEATURE) below
-    before each write, or the device silently ignores it and stays on
-    its hardware-default color. Header TT byte = 0x80. Does NOT
-    reliably recover after the *headset* (not dock) is power-cycled --
-    known limitation, see project memory; the wired path exists
-    specifically to route around this when charging/wired anyway.
+    A plain color write alone only works if the dock's internal state
+    is already "unlocked" (e.g. right after Synapse itself talked to
+    it). After the *headset* is power-cycled, the dock silently
+    ignores color writes again until it sees the same ~140-command
+    recovery sequence Synapse sends on reconnect (~/.local/share/
+    kraken-rgb/dock-recovery-sequence.hex, captured by watching a full
+    real recovery byte-for-byte -- see project memory for how). It's a
+    grab-bag of config/telemetry/capability queries on the *same*
+    Output Report 0x02 channel as the color write, just with different
+    payloads; replaying it verbatim (with ~20ms spacing -- sending it
+    with no delay floods the device and only some commands land)
+    reliably re-unlocks the dock without needing Synapse/Windows at
+    all. Confirmed 2/2 across real headset power-cycles. Since there's
+    no way to tell from Linux whether the dock is currently locked,
+    this always runs before every dock-path color write (adds ~3s).
 
-Both share the same 64-byte Output Report ID 0x02 body: bytes 0-14 are
-a fixed header (only byte 9 differs), then an R,G,B triplet tiled from
-byte 15 to byte 63.
+Both share the same 64-byte Output Report ID 0x02 body for the actual
+color write: bytes 0-14 are a fixed header (only byte 9, TT, differs
+between the two paths), then an R,G,B triplet tiled from byte 15 to
+byte 63.
 
 Usage:
   kraken-rgb R G B     # e.g. kraken-rgb 255 0 0
@@ -33,9 +38,9 @@ import glob
 import os
 import sys
 import time
-import fcntl
 
 STATE_FILE = os.path.expanduser("~/.cache/kraken-rgb-state")
+RECOVERY_FILE = os.path.expanduser("~/.local/share/kraken-rgb/dock-recovery-sequence.hex")
 DEFAULT_ON_COLOR = (0, 200, 255)
 
 
@@ -51,31 +56,27 @@ def find_dock_node():
     return None
 
 
-def _hidiocsfeature(size):
-    return (3 << 30) | (size << 16) | (ord("H") << 8) | 0x06
-
-
-def _set_feature(fd, data):
-    fcntl.ioctl(fd, _hidiocsfeature(len(data)), bytes(data))
-
-
-def enable_lighting(fd):
-    """Dock/RF-only -- NEVER call this on the wired (if05) node, see docstring."""
-    for page in range(9):
-        _set_feature(fd, bytes([0x32, page, 0x00]))
-    _set_feature(fd, bytes.fromhex("3601"))
-    _set_feature(fd, bytes.fromhex("35010000080000000000"))
-    time.sleep(0.34)
-    _set_feature(fd, bytes.fromhex("3600"))
-    _set_feature(fd, bytes.fromhex("3501000008000090fed5"))
-
-
 def build_frame(tt, r, g, b):
     buf = bytearray(64)
     buf[0:15] = bytes.fromhex("020060000000210f03") + bytes([tt]) + bytes(4) + bytes([0x08])
     for i in range(15, 64):
         buf[i] = (r, g, b)[(i - 15) % 3]
     return bytes(buf)
+
+
+def dock_recover(fd):
+    try:
+        with open(RECOVERY_FILE) as f:
+            lines = [l.strip() for l in f if l.strip()]
+    except FileNotFoundError:
+        return
+    for line in lines:
+        data = bytes.fromhex(line.replace(" ", ""))
+        buf = bytearray(64)
+        buf[0:len(data)] = data
+        os.write(fd, bytes(buf))
+        time.sleep(0.02)
+    time.sleep(0.1)
 
 
 def send_color(r, g, b):
@@ -92,7 +93,7 @@ def send_color(r, g, b):
     if dock is not None:
         fd = os.open(dock, os.O_RDWR)
         try:
-            enable_lighting(fd)
+            dock_recover(fd)
             os.write(fd, build_frame(0x80, r, g, b))
         finally:
             os.close(fd)
