@@ -12,6 +12,13 @@ Singleton {
     readonly property bool charging: _charging
     readonly property string via: _via
 
+    // Re-applies the last RGB color once the headset comes back online
+    // (covers the RF-only power-cycle case, which fires no udev event).
+    onAvailableChanged: {
+        if (available)
+            Quickshell.execDetached([Quickshell.env("HOME") + "/.local/bin/kraken-rgb", "restore"]);
+    }
+
     property bool _available: false
     property int _percentage: 0
     property bool _charging: false
@@ -83,7 +90,9 @@ Singleton {
     }
 
     Timer {
-        interval: 60000
+        // Fast enough to notice an RF-only headset power-cycle (no udev
+        // event fires for that case) without much overhead.
+        interval: 8000
         running: true
         repeat: true
         triggeredOnStart: true

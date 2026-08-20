@@ -3,9 +3,13 @@
 Bar widget for [caelestia-dots/shell](https://github.com/caelestia-dots/shell)
 (Quickshell): a headphones icon in the status column that turns orange at ≤20%
 and red at ≤10%, with a Synapse-style hover popout (progress ring, percentage,
-and a bolt badge while charging), plus a row of color swatches and an on/off
-toggle to control the RGB lighting. Battery updates every 60 s, plus instantly
-on USB plug/unplug via `udevadm monitor`.
+and a bolt/check badge while charging or fully charged), plus a row of color
+swatches and an on/off toggle to control the RGB lighting. Battery updates
+every 8 s (fast enough to notice a plain RF headset power-cycle, which raises
+no udev event on its own), plus instantly on USB plug/unplug via `udevadm
+monitor`. Whenever the headset comes back online, `KrakenBattery.qml`
+auto-triggers `kraken-rgb restore` so the last color you set comes back on
+its own — no need to reselect it after every power-cycle.
 
 ![Demo: hover popout with battery ring, bolt badge appearing on plug and disappearing on unplug](demo.gif)
 

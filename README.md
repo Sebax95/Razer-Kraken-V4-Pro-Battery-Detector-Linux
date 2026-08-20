@@ -87,11 +87,21 @@ two different paths depending on how the headset is connected:
   sent to the dock (`1532:0568`) instead, but the dock silently ignores it
   after the *headset* has been power-cycled until it sees the same recovery
   sequence Synapse sends on reconnect: `kraken-rgb` replays
-  [`dock-recovery-sequence.hex`](dock-recovery-sequence.hex) (140 commands,
-  captured from a real Synapse reconnect, ~20ms apart — sending them with no
-  delay floods the dock and only some land) before every dock-path write.
-  Adds ~3s but is fully reliable; confirmed across repeated real headset
-  power-cycles with no Synapse/Windows involved at all.
+  [`dock-recovery-sequence.hex`](dock-recovery-sequence.hex) (55 config/
+  telemetry/capability queries, captured from a real Synapse reconnect and
+  filtered down from the original 140 by dropping the lighting-animation
+  frames that were also in the capture — replaying those caused a visible
+  flash through unrelated colors on every write) before every dock-path
+  write. Commands need ~20ms spacing — sending them with no delay floods the
+  dock and only some land. Adds ~1s but is fully reliable; confirmed across
+  repeated real headset power-cycles with no Synapse/Windows involved at all.
+
+`kraken-rgb restore` re-applies the last color used (reads `~/.cache/
+kraken-rgb-state`) without changing it — meant to be triggered automatically
+once something notices the headset came back online, since a headset-only
+power-cycle raises no udev event on its own (the dock's USB connection never
+drops). See [`examples/caelestia/`](examples/caelestia/) for a working
+example wired into a battery-availability poll.
 
 ```
 02 00 60 00 00 00 21 0f 03 TT 00 00 00 00 08 | RR GG BB RR GG BB …
