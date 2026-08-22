@@ -119,21 +119,23 @@ def main():
         else:
             r, g, b = 0, 0, 0
     elif args == ["restore"]:
-        # Re-applies the last color as-is (no toggling) -- used to
-        # auto-recover the color after the headset reconnects.
+        # Re-applies the last state as-is (color OR off) -- used to
+        # auto-recover after the headset reconnects. Always re-sends,
+        # even "off": without this, a power-cycle leaves the ring on
+        # the dock's own always-on default lighting instead of staying
+        # off, which defeats the point of having turned it off.
         try:
             with open(STATE_FILE) as f:
                 state = f.read().strip()
         except FileNotFoundError:
             return 0
         if state in ("off", ""):
-            return 0
-        try:
-            r, g, b = (int(x) for x in state.split(","))
-        except ValueError:
-            return 0
-        if (r, g, b) == (0, 0, 0):
-            return 0
+            r, g, b = 0, 0, 0
+        else:
+            try:
+                r, g, b = (int(x) for x in state.split(","))
+            except ValueError:
+                return 0
     else:
         print(__doc__, file=sys.stderr)
         return 1
