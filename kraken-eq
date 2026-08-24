@@ -1,0 +1,159 @@
+#!/usr/bin/env python3
+"""Read or switch the EQ preset of a Razer Kraken V4 Pro (dock/RF path only).
+
+Protocol captured from Synapse with usbmon (2026-08-24): a 64-byte HID
+output report (report ID 0x02), same header shape as the battery/charging
+protocol but a different command family:
+
+    request:  02 00 60 00 00 00 05 00 | 00 80 CC 00 | ...
+    response: 02 02 60 00 00 00 05 00 | 00 80 CC 01 | 01 PP 00 00
+
+`CC=0x93` (SET) carries the target preset directly in the request body
+(`01 PP 00 00` right after the header, `PP` = preset ID) rather than
+being a plain query -- sending it changes the preset immediately.
+`CC=0x13` (GET) is a plain query (matching the shape used for battery's
+`0x21`/`0x2a`) and returns the *current* preset in the response's `PP`
+byte. Confirmed by ear (real audio, A/B tested) and by round-tripping
+set-then-get:
+
+    game   = 0x07
+    custom = 0xff
+    music  = 0x08
+    movie  = 0x09
+
+(The dock's `CC=0x13` responses also appear unprompted while Synapse's
+own EQ UI is actively being clicked in -- but NOT just from sitting idle
+with the tab open, and NOT from the physical preset button alone with
+nothing polling. So on Linux, detecting a physical button press means
+actively polling with the GET query yourself; see `kraken-eq-watch`.)
+
+A separate command (`0x95`) returns the active preset's 10-band gain
+array -- not needed just to read/switch the current preset name.
+
+Confirmed working with a single write, no dock-recovery-sequence replay
+needed -- unlike RGB, this channel didn't need it even right after a
+fresh connection. Replaying the recovery sequence first was tried and
+actually caused write timeouts on the following EQ command, so don't
+add it back without re-testing carefully. Untested so far whether this
+survives a real headset power-cycle the way RGB needed the recovery
+sequence for.
+
+Usage:
+  kraken-eq game
+  kraken-eq movie
+  kraken-eq music
+  kraken-eq custom
+  kraken-eq 0x09        # raw preset byte, if a custom Chroma profile uses another ID
+  kraken-eq status       # print/notify the current preset without changing it
+"""
+import glob
+import os
+import select
+import subprocess
+import sys
+import time
+
+PRESETS = {
+    "game": 0x07,
+    "custom": 0xFF,
+    "music": 0x08,
+    "movie": 0x09,
+}
+
+
+def find_dock_node():
+    for path in glob.glob("/dev/input/by-id/*Kraken_V4_Pro*if04-hidraw"):
+        return os.path.realpath(path)
+    return None
+
+
+def preset_name(preset_id):
+    return next((k for k, v in PRESETS.items() if v == preset_id), f"0x{preset_id:02x}").capitalize()
+
+
+def notify(name):
+    try:
+        subprocess.run(
+            ["notify-send", "-a", "Razer Kraken V4 Pro", "-i", "audio-headphones", "Ecualizador", name],
+            capture_output=True,
+        )
+    except FileNotFoundError:
+        pass  # notify-send not installed -- notification is a nice-to-have, not required
+
+
+def set_preset(fd, preset_id):
+    buf = bytearray(64)
+    payload = bytes.fromhex("020060000000050000809300") + bytes([0x01, preset_id, 0x00, 0x00])
+    buf[0:len(payload)] = payload
+    os.write(fd, bytes(buf))
+
+
+def get_preset(fd, timeout=1.5):
+    """Query the dock for the current preset. fd must be O_NONBLOCK."""
+    cmd = bytearray(64)
+    cmd[0] = 0x02
+    cmd[2] = 0x60
+    cmd[6] = 0x05
+    cmd[9] = 0x80
+    cmd[10] = 0x13
+    os.write(fd, bytes(cmd))
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        r, _, _ = select.select([fd], [], [], deadline - time.monotonic())
+        if not r:
+            break
+        data = os.read(fd, 64)
+        if len(data) >= 14 and data[0] == 0x02 and data[10] == 0x13:
+            return data[13]
+    return None
+
+
+def main():
+    if len(sys.argv) != 2:
+        print(__doc__, file=sys.stderr)
+        return 1
+
+    node = find_dock_node()
+    if node is None:
+        print("Kraken V4 Pro (dock, if04) no encontrado.", file=sys.stderr)
+        return 1
+
+    arg = sys.argv[1].lower()
+
+    if arg == "status":
+        fd = os.open(node, os.O_RDWR | os.O_NONBLOCK)
+        try:
+            preset_id = get_preset(fd)
+        finally:
+            os.close(fd)
+        if preset_id is None:
+            print("Sin respuesta del dock.", file=sys.stderr)
+            return 1
+        name = preset_name(preset_id)
+        print(f"EQ: {name}")
+        notify(name)
+        return 0
+
+    if arg in PRESETS:
+        preset_id = PRESETS[arg]
+    else:
+        try:
+            preset_id = int(arg, 0)
+        except ValueError:
+            print(f"Preset desconocido: {arg!r} (opciones: {', '.join(PRESETS)}, status, o un byte 0x..)", file=sys.stderr)
+            return 1
+
+    fd = os.open(node, os.O_RDWR)
+    try:
+        set_preset(fd, preset_id)
+    finally:
+        os.close(fd)
+
+    name = preset_name(preset_id)
+    print(f"EQ: {name}")
+    notify(name)
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

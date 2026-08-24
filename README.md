@@ -1,8 +1,8 @@
 # kraken-v4-pro-battery
 
-Read the battery level and control the RGB lighting of the **Razer Kraken V4
-Pro** headset on Linux, with no Synapse and no OpenRazer required. Works both
-wirelessly (through the dock) and over the USB-C cable.
+Read the battery level, control the RGB lighting, and switch EQ presets on the
+**Razer Kraken V4 Pro** headset on Linux, with no Synapse and no OpenRazer
+required. Works both wirelessly (through the dock) and over the USB-C cable.
 
 ```
 $ kraken-battery
@@ -15,13 +15,18 @@ $ kraken-rgb 255 0 0
 RGB: 255,0,0 (via cable)
 $ kraken-rgb toggle
 RGB: 0,0,0 (via cable)
+
+$ kraken-eq movie
+EQ: Movie
 ```
 
 The `--json` output is meant for status bars and scripts (waybar, quickshell,
 polybar…); on failure it prints `{"error": "..."}` and exits non-zero. See
 [`examples/caelestia/`](examples/caelestia/) for a ready-made bar widget for
 the Caelestia shell (icon + Synapse-style popout with instant plug/unplug
-updates, plus color swatches and an on/off toggle).
+updates, plus color swatches and an on/off toggle), and
+[`examples/systemd/`](examples/systemd/) for a service that sends a desktop
+notification whenever the EQ preset changes via the headset's button.
 
 As of August 2026, OpenRazer has no support for this device (dock `1532:0568`,
 headset `1532:0567`) and the kernel exposes no standard HID battery interface
@@ -32,7 +37,7 @@ a Windows VM with the dock passed through).
 ## Install
 
 ```sh
-install -m 755 kraken-battery kraken-rgb ~/.local/bin/
+install -m 755 kraken-battery kraken-rgb kraken-eq kraken-eq-watch ~/.local/bin/
 install -Dm 644 dock-recovery-sequence.hex ~/.local/share/kraken-rgb/dock-recovery-sequence.hex
 sudo install -m 644 70-kraken-battery.rules /etc/udev/rules.d/
 sudo udevadm control --reload
@@ -116,6 +121,60 @@ on the wired interface. Doing so corrupts it into only lighting one of the
 ring's ~10 individually-addressable LED zones instead of the whole ring, and
 that persists until the cable is unplugged and replugged — it isn't
 reversible in software. The handshake is dock-only.
+
+## EQ presets
+
+`kraken-eq` reads or switches the active EQ preset (dock/RF only — untested
+over the wired path). Same 64-byte report family as battery/charging, a
+different command pair:
+
+```
+request:  02 00 60 00 00 00 05 00 | 00 80 CC 00 | …
+response: 02 02 60 00 00 00 05 00 | 00 80 CC 01 | 01 PP 00 00
+```
+
+`CC=0x93` is SET — unlike a plain query, the request body itself carries the
+target preset (`01 PP 00 00` right after the header) and applying it takes
+effect immediately, no separate "commit" step. `CC=0x13` is GET — a plain
+query (same shape as the battery/charging ones), returns the *current*
+preset in the response's `PP` byte. `PP`, confirmed by ear with real audio
+and by round-tripping set-then-get:
+
+```
+$ kraken-eq movie
+EQ: Movie
+$ kraken-eq status
+EQ: Movie
+```
+
+| Preset | ID |
+|--------|----|
+| `game` | `0x07` |
+| `music` | `0x08` |
+| `movie` | `0x09` |
+| `custom` | `0xff` |
+
+A single write is enough for SET — unlike the RGB dock path, this one did
+**not** need the recovery-sequence replay in testing (in fact replaying it
+first caused the following EQ write to time out, so don't add it back
+without re-testing carefully). Not yet confirmed whether this survives a
+real headset power-cycle the way RGB needed the recovery sequence for.
+
+A separate command (`0x95`) returns the active preset's 10-band gain array —
+not needed just to read/switch the preset name.
+
+**No notification for the physical preset button on its own.** The dock does
+NOT push an unsolicited notification when the button is pressed with nothing
+else polling — confirmed by testing repeatedly with a raw hidraw listener
+and no traffic ever appeared, on both host-only and right after replaying
+the RGB recovery sequence. The `CC=0x13` traffic that shows up in USB
+captures only happens because Synapse's own EQ UI is being actively clicked
+in — not from sitting idle with the tab open, and not from the headset
+button alone. `kraken-eq-watch` works around this by actively polling
+`CC=0x13` itself (every 150ms) and firing a desktop notification
+(`notify-send`) whenever the reported preset changes — see
+[`examples/systemd/`](examples/systemd/) for the service unit that runs it
+continuously.
 
 ## Notes
 

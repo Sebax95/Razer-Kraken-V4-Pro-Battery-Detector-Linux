@@ -1,0 +1,10 @@
+[Unit]
+Description=Razer Kraken V4 Pro EQ preset change notifier
+
+[Service]
+ExecStart=%h/.local/bin/kraken-eq-watch
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=default.target
