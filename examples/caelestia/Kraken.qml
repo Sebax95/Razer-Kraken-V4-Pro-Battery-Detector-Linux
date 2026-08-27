@@ -77,50 +77,13 @@ Column {
         color: root.levelColour
     }
 
-    Row {
-        anchors.horizontalCenter: parent.horizontalCenter
-        spacing: Tokens.spacing.small
-
-        Repeater {
-            model: [
-                { r: 255, g: 0, b: 0 },
-                { r: 255, g: 165, b: 0 },
-                { r: 255, g: 255, b: 0 },
-                { r: 0, g: 255, b: 0 },
-                { r: 0, g: 255, b: 255 },
-                { r: 0, g: 0, b: 255 },
-                { r: 255, g: 0, b: 255 },
-            ]
-
-            StyledRect {
-                id: swatch
-
-                required property var modelData
-
-                implicitWidth: 20
-                implicitHeight: 20
-                radius: Tokens.rounding.full
-                color: Qt.rgba(swatch.modelData.r / 255, swatch.modelData.g / 255, swatch.modelData.b / 255, 1)
-                border.width: 1
-                border.color: Colours.tPalette.m3outline
-
-                MouseArea {
-                    anchors.fill: parent
-                    cursorShape: Qt.PointingHandCursor
-                    onClicked: KrakenRGB.setColor(swatch.modelData.r, swatch.modelData.g, swatch.modelData.b)
-                }
-            }
-        }
-    }
-
-    IconButton {
+    IconTextButton {
         anchors.horizontalCenter: parent.horizontalCenter
 
-        icon: KrakenRGB.on ? "lightbulb" : "lightbulb_outline"
-        type: IconButton.Tonal
-        isToggle: true
-        checked: KrakenRGB.on
+        text: qsTr("Controls")
+        icon: "tune"
+        type: IconTextButton.Tonal
 
-        onClicked: KrakenRGB.toggle()
+        onClicked: KrakenControlWindowFactory.create()
     }
 }
