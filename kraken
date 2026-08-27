@@ -1,0 +1,512 @@
+#!/usr/bin/env python3
+"""Control a Razer Kraken V4 Pro headset via hidraw.
+
+Usage:
+  kraken battery [--json]
+  kraken lights R G B     # e.g. kraken lights 255 0 0
+  kraken lights off
+  kraken lights toggle    # alternates between off and the last color used
+  kraken lights restore   # re-applies the last state (color or off) as-is
+  kraken eq <preset>      # game | movie | music | custom | 0x.. (raw byte)
+  kraken eq status [--json]
+  kraken watch            # polls the EQ preset and notifies on change
+                           # (the only way to catch the physical preset
+                           # button -- see the "eq" section below)
+"""
+import glob
+import json
+import os
+import select
+import subprocess
+import sys
+import time
+
+# =============================================================================
+# shared
+# =============================================================================
+
+
+def find_dock_node():
+    for path in glob.glob("/dev/input/by-id/*Kraken_V4_Pro*if04-hidraw"):
+        return os.path.realpath(path)
+    return None
+
+
+def notify(title, body):
+    try:
+        subprocess.run(
+            ["notify-send", "-a", "Razer Kraken V4 Pro", "-i", "audio-headphones", title, body],
+            capture_output=True,
+        )
+    except FileNotFoundError:
+        pass  # notify-send not installed -- notification is a nice-to-have, not required
+
+
+# =============================================================================
+# battery
+# =============================================================================
+"""Read the battery level of a Razer Kraken V4 Pro via hidraw.
+
+Protocol (captured from Synapse with usbmon, 2026-08-12):
+  command  (64B, report ID 0x02): 02 00 60 00 00 00 04 00 | 00 TT CC 00 | ...
+  response (64B, interrupt IN):   02 02 60 00 00 00 LL 00 | 00 TT CC 01 | VV BB ...
+  TT = 0x80 (dock -> wireless headset) or 0x00 (wired headset)
+  CC = command: 0x21 battery (BB = 0-100, 0xff = no RF link),
+       0x2a charging state (BB = 01 charging), 0x20 RF link (BB = 01 linked)
+  VV = data-valid flag (always 01 on a good reply; NOT the charging state)
+"""
+
+BATTERY_VID = "1532"
+BATTERY_PID_DOCK = "0568"
+BATTERY_PID_WIRED = "0567"
+CMD_BATTERY = 0x21
+CMD_CHARGING = 0x2A
+
+
+def _battery_find_hidraws(pid):
+    """Return the /dev/hidraw* nodes belonging to the given VID:PID."""
+    nodes = []
+    for path in sorted(glob.glob("/sys/class/hidraw/hidraw*")):
+        try:
+            uevent = open(os.path.join(path, "device", "uevent")).read()
+        except OSError:
+            continue
+        if f"HID_ID=0003:0000{BATTERY_VID}:0000{pid}".casefold() in uevent.casefold():
+            nodes.append("/dev/" + os.path.basename(path))
+    return nodes
+
+
+def _battery_query(node, target, cmdid):
+    """Send a command and wait for the response carrying the same ID (byte 10)."""
+    cmd = bytearray(64)
+    cmd[0] = 0x02          # report ID
+    cmd[2] = 0x60
+    cmd[6] = 0x04          # payload length
+    cmd[9] = target        # 0x80 = via dock (RF), 0x00 = direct
+    cmd[10] = cmdid
+    fd = os.open(node, os.O_RDWR | os.O_NONBLOCK)
+    try:
+        os.write(fd, bytes(cmd))
+        deadline = time.monotonic() + 2.0
+        while time.monotonic() < deadline:
+            r, _, _ = select.select([fd], [], [], deadline - time.monotonic())
+            if not r:
+                break
+            data = os.read(fd, 64)
+            # skip the dock's periodic status frames: match our command's echo
+            if len(data) >= 14 and data[0] == 0x02 and data[10] == cmdid:
+                return data[13]
+    finally:
+        os.close(fd)
+    return None
+
+
+def _battery_fail(as_json, message):
+    if as_json:
+        print(json.dumps({"error": message}))
+    else:
+        print(message, file=sys.stderr)
+    return 1
+
+
+def cmd_battery(argv):
+    as_json = "--json" in argv
+    wired = _battery_find_hidraws(BATTERY_PID_WIRED)
+    dock = _battery_find_hidraws(BATTERY_PID_DOCK)
+    if not wired and not dock:
+        return _battery_fail(as_json, "Razer Kraken V4 Pro not found (neither dock nor cable).")
+
+    # Query directly while the cable is plugged in; otherwise via the dock (RF).
+    attempts = [(n, 0x00, "cable") for n in wired] + [(n, 0x80, "dock/RF") for n in dock]
+    for node, target, via in attempts:
+        try:
+            level = _battery_query(node, target, CMD_BATTERY)
+        except PermissionError:
+            print(f"No permission on {node} (udev rule missing).", file=sys.stderr)
+            continue
+        except OSError:
+            continue
+        if level is None or level == 0xFF:
+            continue  # the dock answers 0xff when it has no RF link to the headset
+        try:
+            charging = _battery_query(node, target, CMD_CHARGING)
+        except OSError:
+            charging = None
+        if as_json:
+            print(json.dumps({"battery": level, "charging": charging == 0x01, "via": via}))
+        else:
+            state = "charging" if charging == 0x01 else "discharging"
+            print(f"Battery: {level}% ({state}, via {via})")
+        return 0
+
+    return _battery_fail(as_json, "The headset did not respond (powered off or out of dock range?).")
+
+
+# =============================================================================
+# lights
+# =============================================================================
+"""Set the RGB lighting of a Razer Kraken V4 Pro via hidraw.
+
+Two paths, both captured from Synapse with usbmon (2026-08-13/20):
+
+  Wired (USB cable direct to the headset, PID 0567, if05) -- PREFERRED:
+    Plain write(), no setup needed. Confirmed reliable across real
+    cable unplug/replug cycles. Header TT byte (offset 9) = 0x00.
+
+  Dock/RF (via the dock, PID 0568, if04) -- fallback when not wired:
+    A plain color write alone only works if the dock's internal state
+    is already "unlocked" (e.g. right after Synapse itself talked to
+    it). After the *headset* is power-cycled, the dock silently
+    ignores color writes again until it sees the same ~140-command
+    recovery sequence Synapse sends on reconnect (~/.local/share/
+    kraken-rgb/dock-recovery-sequence.hex, captured by watching a full
+    real recovery byte-for-byte -- see project memory for how). It's a
+    grab-bag of config/telemetry/capability queries on the *same*
+    Output Report 0x02 channel as the color write, just with different
+    payloads; replaying it verbatim (with ~20ms spacing -- sending it
+    with no delay floods the device and only some commands land)
+    reliably re-unlocks the dock without needing Synapse/Windows at
+    all. Confirmed 2/2 across real headset power-cycles. Since there's
+    no way to tell from Linux whether the dock is currently locked,
+    this always runs before every dock-path color write (adds ~3s).
+
+Both share the same 64-byte Output Report ID 0x02 body for the actual
+color write: bytes 0-14 are a fixed header (only byte 9, TT, differs
+between the two paths), then an R,G,B triplet tiled from byte 15 to
+byte 63.
+"""
+
+LIGHTS_STATE_FILE = os.path.expanduser("~/.cache/kraken-rgb-state")
+LIGHTS_RECOVERY_FILE = os.path.expanduser("~/.local/share/kraken-rgb/dock-recovery-sequence.hex")
+LIGHTS_DEFAULT_ON_COLOR = (0, 200, 255)
+
+
+def _lights_find_wired_node():
+    for path in glob.glob("/dev/input/by-id/*Razer_Inc_Razer_Kraken_V4_Pro*if05-hidraw"):
+        return os.path.realpath(path)
+    return None
+
+
+def _lights_build_frame(tt, r, g, b):
+    buf = bytearray(64)
+    buf[0:15] = bytes.fromhex("020060000000210f03") + bytes([tt]) + bytes(4) + bytes([0x08])
+    for i in range(15, 64):
+        buf[i] = (r, g, b)[(i - 15) % 3]
+    return bytes(buf)
+
+
+def _lights_dock_recover(fd):
+    try:
+        with open(LIGHTS_RECOVERY_FILE) as f:
+            lines = [l.strip() for l in f if l.strip()]
+    except FileNotFoundError:
+        return
+    for line in lines:
+        data = bytes.fromhex(line.replace(" ", ""))
+        buf = bytearray(64)
+        buf[0:len(data)] = data
+        os.write(fd, bytes(buf))
+        time.sleep(0.02)
+    time.sleep(0.1)
+
+
+def _lights_send_color(r, g, b):
+    wired = _lights_find_wired_node()
+    if wired is not None:
+        fd = os.open(wired, os.O_RDWR)
+        try:
+            os.write(fd, _lights_build_frame(0x00, r, g, b))
+        finally:
+            os.close(fd)
+        return "cable"
+
+    dock = find_dock_node()
+    if dock is not None:
+        fd = os.open(dock, os.O_RDWR)
+        try:
+            _lights_dock_recover(fd)
+            os.write(fd, _lights_build_frame(0x80, r, g, b))
+        finally:
+            os.close(fd)
+        return "dock/RF"
+
+    return None
+
+
+def cmd_lights(argv):
+    if len(argv) == 3:
+        r, g, b = (int(x) for x in argv)
+    elif argv == ["off"]:
+        r, g, b = 0, 0, 0
+    elif argv == ["toggle"]:
+        try:
+            with open(LIGHTS_STATE_FILE) as f:
+                state = f.read().strip()
+        except FileNotFoundError:
+            state = "off"
+        if state in ("off", "0,0,0"):
+            r, g, b = LIGHTS_DEFAULT_ON_COLOR
+        else:
+            r, g, b = 0, 0, 0
+    elif argv == ["restore"]:
+        # Re-applies the last state as-is (color OR off) -- used to
+        # auto-recover after the headset reconnects. Always re-sends,
+        # even "off": without this, a power-cycle leaves the ring on
+        # the dock's own always-on default lighting instead of staying
+        # off, which defeats the point of having turned it off.
+        try:
+            with open(LIGHTS_STATE_FILE) as f:
+                state = f.read().strip()
+        except FileNotFoundError:
+            return 0
+        if state in ("off", ""):
+            r, g, b = 0, 0, 0
+        else:
+            try:
+                r, g, b = (int(x) for x in state.split(","))
+            except ValueError:
+                return 0
+    else:
+        print("Usage: kraken lights R G B | off | toggle | restore", file=sys.stderr)
+        return 1
+
+    via = _lights_send_color(r, g, b)
+    if via is None:
+        print("Kraken V4 Pro no encontrado (ni cable ni dock).", file=sys.stderr)
+        return 1
+
+    with open(LIGHTS_STATE_FILE, "w") as f:
+        f.write(f"{r},{g},{b}")
+    print(f"RGB: {r},{g},{b} (via {via})")
+    return 0
+
+
+# =============================================================================
+# eq
+# =============================================================================
+"""Read or switch the EQ preset of a Razer Kraken V4 Pro (dock/RF path only).
+
+Protocol captured from Synapse with usbmon (2026-08-24): a 64-byte HID
+output report (report ID 0x02), same header shape as the battery/charging
+protocol but a different command family:
+
+    request:  02 00 60 00 00 00 05 00 | 00 80 CC 00 | ...
+    response: 02 02 60 00 00 00 05 00 | 00 80 CC 01 | 01 PP 00 00
+
+`CC=0x93` (SET) carries the target preset directly in the request body
+(`01 PP 00 00` right after the header, `PP` = preset ID) rather than
+being a plain query -- sending it changes the preset immediately.
+`CC=0x13` (GET) is a plain query (matching the shape used for battery's
+`0x21`/`0x2a`) and returns the *current* preset in the response's `PP`
+byte. Confirmed by ear (real audio, A/B tested) and by round-tripping
+set-then-get:
+
+    game   = 0x07
+    custom = 0xff
+    music  = 0x08
+    movie  = 0x09
+
+(The dock's `CC=0x13` responses also appear unprompted while Synapse's
+own EQ UI is actively being clicked in -- but NOT just from sitting idle
+with the tab open, and NOT from the physical preset button alone with
+nothing polling. So on Linux, detecting a physical button press means
+actively polling with the GET query yourself; see the "watch" section.)
+
+A separate command (`0x95`) returns the active preset's 10-band gain
+array -- not needed just to read/switch the current preset name.
+
+Confirmed working with a single write, no dock-recovery-sequence replay
+needed -- unlike lights, this channel didn't need it even right after a
+fresh connection. Replaying the recovery sequence first was tried and
+actually caused write timeouts on the following EQ command, so don't
+add it back without re-testing carefully. Untested so far whether this
+survives a real headset power-cycle the way RGB needed the recovery
+sequence for.
+"""
+
+EQ_PRESETS = {
+    "game": 0x07,
+    "custom": 0xFF,
+    "music": 0x08,
+    "movie": 0x09,
+}
+
+
+def eq_preset_name(preset_id):
+    return next((k for k, v in EQ_PRESETS.items() if v == preset_id), f"0x{preset_id:02x}").capitalize()
+
+
+def _eq_set_preset(fd, preset_id):
+    buf = bytearray(64)
+    payload = bytes.fromhex("020060000000050000809300") + bytes([0x01, preset_id, 0x00, 0x00])
+    buf[0:len(payload)] = payload
+    os.write(fd, bytes(buf))
+
+
+def eq_get_preset(fd, timeout=1.5):
+    """Query the dock for the current preset. fd must be O_NONBLOCK."""
+    cmd = bytearray(64)
+    cmd[0] = 0x02
+    cmd[2] = 0x60
+    cmd[6] = 0x05
+    cmd[9] = 0x80
+    cmd[10] = 0x13
+    os.write(fd, bytes(cmd))
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        r, _, _ = select.select([fd], [], [], deadline - time.monotonic())
+        if not r:
+            break
+        data = os.read(fd, 64)
+        if len(data) >= 14 and data[0] == 0x02 and data[10] == 0x13:
+            return data[13]
+    return None
+
+
+def cmd_eq(argv):
+    if len(argv) not in (1, 2):
+        print("Usage: kraken eq <game|movie|music|custom|0x..> | status [--json]", file=sys.stderr)
+        return 1
+
+    node = find_dock_node()
+    if node is None:
+        if len(argv) == 2 and argv[1] == "--json":
+            print(json.dumps({"preset": None}))
+            return 0
+        print("Kraken V4 Pro (dock, if04) no encontrado.", file=sys.stderr)
+        return 1
+
+    arg = argv[0].lower()
+
+    if arg == "status":
+        as_json = len(argv) == 2 and argv[1] == "--json"
+        fd = os.open(node, os.O_RDWR | os.O_NONBLOCK)
+        try:
+            preset_id = eq_get_preset(fd)
+        finally:
+            os.close(fd)
+        if preset_id is None:
+            if as_json:
+                print(json.dumps({"preset": None}))
+                return 0
+            print("Sin respuesta del dock.", file=sys.stderr)
+            return 1
+        name = eq_preset_name(preset_id)
+        if as_json:
+            # Machine-readable form for KrakenEQ.qml -- lowercase key so it
+            # matches the internal EQ_PRESETS dict / QML preset names directly,
+            # no notification (this runs silently whenever the control
+            # window opens, not just on a real user-initiated change).
+            print(json.dumps({"preset": name.lower()}))
+            return 0
+        print(f"EQ: {name}")
+        notify("Ecualizador", name)
+        return 0
+
+    if arg in EQ_PRESETS:
+        preset_id = EQ_PRESETS[arg]
+    else:
+        try:
+            preset_id = int(arg, 0)
+        except ValueError:
+            print(f"Preset desconocido: {arg!r} (opciones: {', '.join(EQ_PRESETS)}, status, o un byte 0x..)", file=sys.stderr)
+            return 1
+
+    fd = os.open(node, os.O_RDWR)
+    try:
+        _eq_set_preset(fd, preset_id)
+    finally:
+        os.close(fd)
+
+    name = eq_preset_name(preset_id)
+    print(f"EQ: {name}")
+    # No notify() here on purpose -- "kraken watch" (if running) already
+    # notifies on any preset change, whether it came from this command,
+    # the physical button, or Synapse. Calling notify() here too would
+    # double it up. `status` above still notifies since it's a read-only
+    # check the watcher wouldn't otherwise announce.
+    return 0
+
+
+# =============================================================================
+# watch
+# =============================================================================
+"""Poll the Kraken V4 Pro's current EQ preset and notify on change.
+
+Only needed to react to the physical preset button on the headset:
+there's no unsolicited notification for that (see the "eq" section
+above) so this just polls the same read-only query "eq status" uses,
+every couple of seconds, and fires a desktop notification whenever the
+reported preset differs from the last poll.
+
+Meant to run continuously (systemd --user unit, or just backgrounded).
+"""
+
+WATCH_POLL_INTERVAL = 0.15
+
+
+def cmd_watch(argv):
+    last_preset = None
+    fd = None
+    node = None
+
+    while True:
+        cur_node = find_dock_node()
+        if cur_node is None:
+            time.sleep(WATCH_POLL_INTERVAL)
+            continue
+        if cur_node != node or fd is None:
+            if fd is not None:
+                try:
+                    os.close(fd)
+                except OSError:
+                    pass
+            try:
+                fd = os.open(cur_node, os.O_RDWR | os.O_NONBLOCK)
+            except OSError:
+                time.sleep(WATCH_POLL_INTERVAL)
+                continue
+            node = cur_node
+
+        try:
+            preset_id = eq_get_preset(fd, timeout=0.3)
+        except OSError:
+            try:
+                os.close(fd)
+            except OSError:
+                pass
+            fd = None
+            node = None
+            time.sleep(WATCH_POLL_INTERVAL)
+            continue
+
+        if preset_id is not None and preset_id != last_preset:
+            if last_preset is not None:  # skip the very first read on startup
+                name = eq_preset_name(preset_id)
+                notify("Ecualizador", name)
+            last_preset = preset_id
+
+        time.sleep(WATCH_POLL_INTERVAL)
+
+
+# =============================================================================
+# dispatch
+# =============================================================================
+
+COMMANDS = {
+    "battery": cmd_battery,
+    "lights": cmd_lights,
+    "eq": cmd_eq,
+    "watch": cmd_watch,
+}
+
+
+def main():
+    if len(sys.argv) < 2 or sys.argv[1] not in COMMANDS:
+        print(__doc__, file=sys.stderr)
+        return 1
+    return COMMANDS[sys.argv[1]](sys.argv[2:])
+
+
+if __name__ == "__main__":
+    sys.exit(main())

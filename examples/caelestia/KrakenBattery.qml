@@ -16,7 +16,7 @@ Singleton {
     // (covers the RF-only power-cycle case, which fires no udev event).
     onAvailableChanged: {
         if (available)
-            Quickshell.execDetached([Quickshell.env("HOME") + "/.local/bin/kraken-rgb", "restore"]);
+            Quickshell.execDetached([Quickshell.env("HOME") + "/.local/bin/kraken", "lights", "restore"]);
     }
 
     property bool _available: false
@@ -30,7 +30,7 @@ Singleton {
     Process {
         id: proc
 
-        command: [Quickshell.env("HOME") + "/.local/bin/kraken-battery", "--json"]
+        command: [Quickshell.env("HOME") + "/.local/bin/kraken", "battery", "--json"]
         stdout: StdioCollector {
             onStreamFinished: {
                 let ok = false;

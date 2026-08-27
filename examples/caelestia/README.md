@@ -16,25 +16,24 @@ switch.
 Battery updates every 8 s (fast enough to notice a plain RF headset
 power-cycle, which raises no udev event on its own), plus instantly on USB
 plug/unplug via `udevadm monitor`. Whenever the headset comes back online,
-`KrakenBattery.qml` auto-triggers `kraken-rgb restore` so the last color you
-set comes back on its own — no need to reselect it after every power-cycle.
-The Equalizer tab queries the real hardware state (`kraken-eq status --json`)
-on load, so the current preset shows as selected immediately instead of only
-after you click one.
+`KrakenBattery.qml` auto-triggers `kraken lights restore` so the last color
+you set comes back on its own — no need to reselect it after every
+power-cycle. The Equalizer tab queries the real hardware state
+(`kraken eq status --json`) on load, so the current preset shows as selected
+immediately instead of only after you click one.
 
 ![Demo: hover popout with battery ring, bolt badge appearing on plug and disappearing on unplug](demo.gif)
 
-Requires `kraken-battery`, `kraken-rgb`, and `kraken-eq` installed at
-`~/.local/bin/` (see the main README).
+Requires `kraken` installed at `~/.local/bin/kraken` (see the main README).
 
 ## Files
 
 - `KrakenBattery.qml` → copy to `services/` (singleton that polls
-  `kraken-battery --json`)
+  `kraken battery --json`)
 - `KrakenRGB.qml` → copy to `services/` (singleton that fire-and-forgets
-  `kraken-rgb` calls)
+  `kraken lights ...` calls)
 - `KrakenEQ.qml` → copy to `services/` (singleton that polls
-  `kraken-eq status --json` and fire-and-forgets preset changes)
+  `kraken eq status --json` and fire-and-forgets preset changes)
 - `Kraken.qml` → copy to `modules/bar/popouts/` (the hover popout — battery
   ring plus a "Controls" button that opens the window below)
 - `KrakenControlWindowFactory.qml` → copy to `modules/bar/popouts/` (the

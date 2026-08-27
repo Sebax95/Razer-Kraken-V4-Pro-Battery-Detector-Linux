@@ -5,18 +5,18 @@ Read the battery level, control the RGB lighting, and switch EQ presets on the
 required. Works both wirelessly (through the dock) and over the USB-C cable.
 
 ```
-$ kraken-battery
+$ kraken battery
 Battery: 84% (discharging, via dock/RF)
 
-$ kraken-battery --json
+$ kraken battery --json
 {"battery": 84, "charging": false, "via": "dock/RF"}
 
-$ kraken-rgb 255 0 0
+$ kraken lights 255 0 0
 RGB: 255,0,0 (via cable)
-$ kraken-rgb toggle
+$ kraken lights toggle
 RGB: 0,0,0 (via cable)
 
-$ kraken-eq movie
+$ kraken eq movie
 EQ: Movie
 ```
 
@@ -37,7 +37,7 @@ a Windows VM with the dock passed through).
 ## Install
 
 ```sh
-install -m 755 kraken-battery kraken-rgb kraken-eq kraken-eq-watch ~/.local/bin/
+install -m 755 kraken ~/.local/bin/
 install -Dm 644 dock-recovery-sequence.hex ~/.local/share/kraken-rgb/dock-recovery-sequence.hex
 sudo install -m 644 70-kraken-battery.rules /etc/udev/rules.d/
 sudo udevadm control --reload
@@ -81,8 +81,8 @@ wireless headset displayed exactly the value returned by command `0x21`
 
 ## RGB lighting
 
-`kraken-rgb` sets the earcup RGB ring to a solid color, or turns it off, using
-two different paths depending on how the headset is connected:
+`kraken lights` sets the earcup RGB ring to a solid color, or turns it off,
+using two different paths depending on how the headset is connected:
 
 - **Wired (USB-C cable)** — preferred. A plain 64-byte HID output report
   (report ID `0x02`) to the headset's own `hidraw` interface (`1532:0567`),
@@ -91,7 +91,7 @@ two different paths depending on how the headset is connected:
 - **Dock/RF (wireless)** — fallback when no cable is connected. Same report,
   sent to the dock (`1532:0568`) instead, but the dock silently ignores it
   after the *headset* has been power-cycled until it sees the same recovery
-  sequence Synapse sends on reconnect: `kraken-rgb` replays
+  sequence Synapse sends on reconnect: `kraken lights` replays
   [`dock-recovery-sequence.hex`](dock-recovery-sequence.hex) (55 config/
   telemetry/capability queries, captured from a real Synapse reconnect and
   filtered down from the original 140 by dropping the lighting-animation
@@ -101,7 +101,7 @@ two different paths depending on how the headset is connected:
   dock and only some land. Adds ~1s but is fully reliable; confirmed across
   repeated real headset power-cycles with no Synapse/Windows involved at all.
 
-`kraken-rgb restore` re-applies the last color used (reads `~/.cache/
+`kraken lights restore` re-applies the last color used (reads `~/.cache/
 kraken-rgb-state`) without changing it — meant to be triggered automatically
 once something notices the headset came back online, since a headset-only
 power-cycle raises no udev event on its own (the dock's USB connection never
@@ -124,7 +124,7 @@ reversible in software. The handshake is dock-only.
 
 ## EQ presets
 
-`kraken-eq` reads or switches the active EQ preset (dock/RF only — untested
+`kraken eq` reads or switches the active EQ preset (dock/RF only — untested
 over the wired path). Same 64-byte report family as battery/charging, a
 different command pair:
 
@@ -141,9 +141,9 @@ preset in the response's `PP` byte. `PP`, confirmed by ear with real audio
 and by round-tripping set-then-get:
 
 ```
-$ kraken-eq movie
+$ kraken eq movie
 EQ: Movie
-$ kraken-eq status
+$ kraken eq status
 EQ: Movie
 ```
 
@@ -170,7 +170,7 @@ and no traffic ever appeared, on both host-only and right after replaying
 the RGB recovery sequence. The `CC=0x13` traffic that shows up in USB
 captures only happens because Synapse's own EQ UI is being actively clicked
 in — not from sitting idle with the tab open, and not from the headset
-button alone. `kraken-eq-watch` works around this by actively polling
+button alone. `kraken watch` works around this by actively polling
 `CC=0x13` itself (every 150ms) and firing a desktop notification
 (`notify-send`) whenever the reported preset changes — see
 [`examples/systemd/`](examples/systemd/) for the service unit that runs it

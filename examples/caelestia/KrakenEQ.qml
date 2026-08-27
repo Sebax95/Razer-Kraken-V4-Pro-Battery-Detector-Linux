@@ -11,10 +11,10 @@ Singleton {
 
     property string _current: ""
 
-    readonly property string _bin: Quickshell.env("HOME") + "/.local/bin/kraken-eq"
+    readonly property string _bin: Quickshell.env("HOME") + "/.local/bin/kraken"
 
     function setPreset(name: string): void {
-        Quickshell.execDetached([root._bin, name]);
+        Quickshell.execDetached([root._bin, "eq", name]);
         root._current = name;
     }
 
@@ -27,7 +27,7 @@ Singleton {
     Process {
         id: statusProc
 
-        command: [root._bin, "status", "--json"]
+        command: [root._bin, "eq", "status", "--json"]
         stdout: StdioCollector {
             onStreamFinished: {
                 try {
