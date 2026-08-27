@@ -45,8 +45,10 @@ Usage:
   kraken-eq custom
   kraken-eq 0x09        # raw preset byte, if a custom Chroma profile uses another ID
   kraken-eq status       # print/notify the current preset without changing it
+  kraken-eq status --json  # print {"preset": "game"} for scripts/QML, no notification
 """
 import glob
+import json
 import os
 import select
 import subprocess
@@ -109,27 +111,41 @@ def get_preset(fd, timeout=1.5):
 
 
 def main():
-    if len(sys.argv) != 2:
+    if len(sys.argv) not in (2, 3):
         print(__doc__, file=sys.stderr)
         return 1
 
     node = find_dock_node()
     if node is None:
+        if len(sys.argv) == 3 and sys.argv[2] == "--json":
+            print(json.dumps({"preset": None}))
+            return 0
         print("Kraken V4 Pro (dock, if04) no encontrado.", file=sys.stderr)
         return 1
 
     arg = sys.argv[1].lower()
 
     if arg == "status":
+        as_json = len(sys.argv) == 3 and sys.argv[2] == "--json"
         fd = os.open(node, os.O_RDWR | os.O_NONBLOCK)
         try:
             preset_id = get_preset(fd)
         finally:
             os.close(fd)
         if preset_id is None:
+            if as_json:
+                print(json.dumps({"preset": None}))
+                return 0
             print("Sin respuesta del dock.", file=sys.stderr)
             return 1
         name = preset_name(preset_id)
+        if as_json:
+            # Machine-readable form for KrakenEQ.qml -- lowercase key so it
+            # matches the internal PRESETS dict / QML preset names directly,
+            # no notification (this runs silently whenever the control
+            # window opens, not just on a real user-initiated change).
+            print(json.dumps({"preset": name.lower()}))
+            return 0
         print(f"EQ: {name}")
         notify(name)
         return 0
@@ -151,7 +167,11 @@ def main():
 
     name = preset_name(preset_id)
     print(f"EQ: {name}")
-    notify(name)
+    # No notify() here on purpose -- kraken-eq-watch (if running) already
+    # notifies on any preset change, whether it came from this command,
+    # the physical button, or Synapse. Calling notify() here too would
+    # double it up. `status` above still notifies since it's a read-only
+    # check the watcher wouldn't otherwise announce.
     return 0
 
 
