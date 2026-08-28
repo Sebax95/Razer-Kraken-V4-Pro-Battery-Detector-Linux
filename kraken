@@ -177,8 +177,12 @@ byte 63.
 """
 
 LIGHTS_STATE_FILE = os.path.expanduser("~/.cache/kraken-rgb-state")
+# Separate from LIGHTS_STATE_FILE (which also stores "0,0,0" for off) --
+# this only ever holds the last real (non-off) color, so toggling back on
+# restores it instead of always falling back to LIGHTS_DEFAULT_ON_COLOR.
+LIGHTS_LAST_COLOR_FILE = os.path.expanduser("~/.cache/kraken-rgb-last-color")
 LIGHTS_RECOVERY_FILE = os.path.expanduser("~/.local/share/kraken-rgb/dock-recovery-sequence.hex")
-LIGHTS_DEFAULT_ON_COLOR = (0, 200, 255)
+LIGHTS_DEFAULT_ON_COLOR = (0, 255, 0)  # bright green -- Razer's official #44D62C looked too dark on the actual LED ring; used only the very first time, before any real color has been set
 
 
 def _lights_find_wired_node():
@@ -245,7 +249,11 @@ def cmd_lights(argv):
         except FileNotFoundError:
             state = "off"
         if state in ("off", "0,0,0"):
-            r, g, b = LIGHTS_DEFAULT_ON_COLOR
+            try:
+                with open(LIGHTS_LAST_COLOR_FILE) as f:
+                    r, g, b = (int(x) for x in f.read().strip().split(","))
+            except (FileNotFoundError, ValueError):
+                r, g, b = LIGHTS_DEFAULT_ON_COLOR
         else:
             r, g, b = 0, 0, 0
     elif argv == ["restore"]:
@@ -277,6 +285,9 @@ def cmd_lights(argv):
 
     with open(LIGHTS_STATE_FILE, "w") as f:
         f.write(f"{r},{g},{b}")
+    if (r, g, b) != (0, 0, 0):
+        with open(LIGHTS_LAST_COLOR_FILE, "w") as f:
+            f.write(f"{r},{g},{b}")
     print(f"RGB: {r},{g},{b} (via {via})")
     return 0
 
