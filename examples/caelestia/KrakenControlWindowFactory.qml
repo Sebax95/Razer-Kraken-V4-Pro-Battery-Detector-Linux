@@ -33,9 +33,9 @@ Singleton {
                     destroy();
             }
 
-            implicitWidth: 640
-            implicitHeight: 680
-            minimumSize.width: 540
+            implicitWidth: 610
+            implicitHeight: 616
+            minimumSize.width: 600
             minimumSize.height: 540
 
             contentItem.Config.screen: screen.name

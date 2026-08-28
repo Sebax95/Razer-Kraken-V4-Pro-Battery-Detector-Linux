@@ -135,19 +135,19 @@ IpcHandler {
 }
 ```
 
-### `modules/nexus/common/ToggleRow.qml` (optional)
+### Hyprland (or your compositor's floating-window rule)
 
-The Lights tab's on/off toggle needs its text to stay readable when the row's
-background switches to a bright "on" colour. If your `ToggleRow` doesn't
-already support per-usage text colours, add these two optional properties
-(defaults preserve existing behaviour for every other usage):
+`KrakenControlWindowFactory.qml`'s `FloatingWindow` needs an explicit float
+rule — without one, a tiling WM will tile it like any other window instead of
+floating it as a small control panel. For Hyprland:
 
-```qml
-property color textColour: Colours.palette.m3onSurface
-property color subtextColour: Colours.palette.m3outline
+```
+windowrule = match:title ^(Razer Kraken V4 Pro)$, float on, center on
 ```
 
-...and bind the label/subtext `StyledText` elements to `root.textColour` /
-`root.subtextColour` instead of the hardcoded `Colours.palette.m3outline`.
+Don't pin a `size` in the rule — the window already sizes itself
+(`implicitWidth`/`implicitHeight`/`minimumSize` in
+`KrakenControlWindowFactory.qml`), and a fixed compositor-side size silently
+overrides any size tweak you make there.
 
 Then restart the shell (`qs kill -c caelestia && qs -c caelestia -n -d`).

@@ -5,6 +5,7 @@ import QtQuick.Layouts
 import Caelestia.Blobs
 import Caelestia.Config
 import qs.components
+import qs.components.containers
 import qs.components.controls
 import qs.services
 
@@ -51,6 +52,7 @@ Item {
         anchors.margins: Tokens.padding.medium
         radius: 10
         color: Colours.palette.m3surface // main dark background (behind tabs + tab content)
+        clip: true // keep tab content from bleeding past the window edge at small sizes
 
         Row {
             id: tabsRow
@@ -120,20 +122,37 @@ Item {
             opacity: 0.5
         }
 
-        Item {
+        VerticalFadeFlickable {
+            id: tabFlick
+
             anchors.top: divider.bottom
             anchors.topMargin: Tokens.padding.large
             anchors.left: parent.left
             anchors.right: parent.right
             anchors.bottom: parent.bottom
             anchors.bottomMargin: Tokens.padding.large
+            anchors.leftMargin: Tokens.padding.large
+            anchors.rightMargin: Tokens.padding.large
+
+            contentWidth: width
+            contentHeight: tabLoader.height
+            boundsBehavior: Flickable.StopAtBounds
+
+            StyledScrollBar.vertical: StyledScrollBar {
+                flickable: tabFlick
+            }
 
             Loader {
                 id: tabLoader
 
-                anchors.fill: parent
-                anchors.margins: Tokens.padding.large
-                anchors.topMargin: Tokens.padding.large
+                width: tabFlick.width
+                // Tabs with real intrinsic content (Lights) report a positive
+                // implicitHeight so they size to their own content and can
+                // scroll; tabs without one (Equalizer, WIP placeholders) fall
+                // back to filling the viewport so their fillHeight layouts
+                // and centered content still work as before.
+                height: item ? (item.implicitHeight > 0 ? item.implicitHeight : tabFlick.height) : tabFlick.height
+                y: 0
                 opacity: 0
 
                 onLoaded: entranceAnim.restart()
@@ -152,9 +171,9 @@ Item {
                     Anim {
                         type: Anim.DefaultEffects
                         target: tabLoader
-                        property: "anchors.topMargin"
-                        from: Tokens.padding.large + 16
-                        to: Tokens.padding.large
+                        property: "y"
+                        from: 16
+                        to: 0
                     }
                 }
 
