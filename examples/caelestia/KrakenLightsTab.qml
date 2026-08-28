@@ -59,6 +59,7 @@ Item {
             first: true
             last: false
             verticalPadding: Tokens.padding.large
+            horizontalPadding: Tokens.padding.large + Tokens.padding.small // match the SectionHeaders' left inset (card margin + their own leftMargin)
             text: qsTr("Lights")
             checked: KrakenRGB.on
             onToggled: KrakenRGB.toggle()
@@ -76,7 +77,7 @@ Item {
 
                 anchors.fill: parent
                 anchors.margins: Tokens.padding.large
-                spacing: Tokens.spacing.normal
+                spacing: Tokens.spacing.medium
 
                 SectionHeader {
                     Layout.fillWidth: true
@@ -86,12 +87,13 @@ Item {
 
                 Item {
                     Layout.fillWidth: true
+                    Layout.leftMargin: Tokens.padding.large
                     Layout.preferredHeight: 50
 
                     Row {
                         anchors.left: parent.left
                         anchors.verticalCenter: parent.verticalCenter
-                        spacing: Tokens.spacing.normal
+                        spacing: Tokens.spacing.medium
 
                         Repeater {
                             model: root.swatches
@@ -150,7 +152,7 @@ Item {
 
                 anchors.fill: parent
                 anchors.margins: Tokens.padding.large
-                spacing: Tokens.spacing.normal
+                spacing: Tokens.spacing.medium
 
                 SectionHeader {
                     Layout.fillWidth: true
@@ -160,6 +162,7 @@ Item {
 
                 Item {
                     Layout.fillWidth: true
+                    Layout.leftMargin: Tokens.padding.large
                     Layout.preferredHeight: 110
 
                     RowLayout {
@@ -233,15 +236,15 @@ Item {
                         ColumnLayout {
                             Layout.fillWidth: true
                             Layout.fillHeight: true
-                            spacing: Tokens.spacing.normal
+                            spacing: Tokens.spacing.medium
 
                             RowLayout {
-                                spacing: Tokens.spacing.normal
+                                spacing: Tokens.spacing.medium
 
                                 StyledRect {
                                     Layout.preferredWidth: 48
                                     Layout.preferredHeight: 48
-                                    radius: Tokens.rounding.normal
+                                    radius: Tokens.rounding.medium
                                     color: root.pendingColour
                                     border.width: 1
                                     border.color: Colours.tPalette.m3outline
@@ -291,7 +294,7 @@ Item {
 
                 anchors.fill: parent
                 anchors.margins: Tokens.padding.large
-                spacing: Tokens.spacing.normal
+                spacing: Tokens.spacing.medium
 
                 SectionHeader {
                     Layout.fillWidth: true
@@ -301,6 +304,7 @@ Item {
 
                 Item {
                     Layout.fillWidth: true
+                    Layout.leftMargin: Tokens.padding.large
                     Layout.preferredHeight: 32
 
                     Row {
@@ -317,13 +321,15 @@ Item {
                                 required property var modelData
 
                                 anchors.verticalCenter: parent.verticalCenter
-                                implicitWidth: 112
+                                implicitWidth: fxRow.implicitWidth + Tokens.padding.medium * 2
                                 implicitHeight: 32
                                 radius: Tokens.rounding.full
                                 color: Colours.palette.m3secondaryContainer // button colour (unselected EQ preset, effects chips, unselected tabs)
                                 opacity: 0.55
 
-                                Row {
+                                RowLayout {
+                                    id: fxRow
+
                                     anchors.centerIn: parent
                                     spacing: Tokens.spacing.small / 2
 

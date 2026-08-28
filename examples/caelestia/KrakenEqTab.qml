@@ -34,8 +34,8 @@ Item {
             Layout.fillWidth: true
             Layout.fillHeight: true
             columns: 2
-            columnSpacing: Tokens.spacing.normal
-            rowSpacing: Tokens.spacing.normal
+            columnSpacing: Tokens.spacing.medium
+            rowSpacing: Tokens.spacing.medium
 
             Repeater {
                 model: root.presets

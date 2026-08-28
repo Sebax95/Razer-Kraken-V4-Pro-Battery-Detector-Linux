@@ -115,7 +115,7 @@ Item {
             anchors.left: parent.left
             anchors.right: parent.right
             anchors.top: tabsRow.bottom
-            anchors.margins: Tokens.padding.normal
+            anchors.margins: Tokens.padding.medium
             anchors.topMargin: Tokens.padding.large
             implicitHeight: 1
             color: Colours.palette.m3surfaceContainerHigh // divider line colour (also section dividers + unselected EQ/toggle rows)

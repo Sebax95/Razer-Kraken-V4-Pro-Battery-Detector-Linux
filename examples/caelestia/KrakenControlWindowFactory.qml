@@ -34,7 +34,7 @@ Singleton {
             }
 
             implicitWidth: 610
-            implicitHeight: 616
+            implicitHeight: 638
             minimumSize.width: 600
             minimumSize.height: 540
 
