@@ -31,15 +31,18 @@ Requires `kraken` installed at `~/.local/bin/kraken` (see the main README).
 - `KrakenBattery.qml` → copy to `services/` (singleton that polls
   `kraken battery --json`)
 - `KrakenRGB.qml` → copy to `services/` (singleton that fire-and-forgets
-  `kraken lights ...` calls)
+  `kraken lights ...` calls, and reads `~/.cache/kraken-rgb-state` on load
+  and on change so it stays in sync with the real light even if something
+  outside this app changed it)
 - `KrakenEQ.qml` → copy to `services/` (singleton that polls
   `kraken eq status --json` and fire-and-forgets preset changes)
 - `Kraken.qml` → copy to `modules/bar/popouts/` (the hover popout — battery
   ring plus a "Controls" button that opens the window below)
 - `KrakenControlWindowFactory.qml` → copy to `modules/bar/popouts/` (the
   `FloatingWindow` wrapper — fade-in on open, drop shadow)
-- `KrakenControlWindow.qml` → copy to `modules/bar/popouts/` (tabs, the
-  Blob-based border/notch, tab-switch fade+slide animation)
+- `KrakenControlWindow.qml` → copy to `modules/bar/popouts/` (tabs, a
+  battery icon + percentage next to them, the Blob-based border/notch,
+  tab-switch fade+slide animation)
 - `KrakenLightsTab.qml` → copy to `modules/bar/popouts/` (presets, custom
   colour wheel, effects chips, on/off toggle)
 - `KrakenEqTab.qml` → copy to `modules/bar/popouts/` (EQ preset grid)

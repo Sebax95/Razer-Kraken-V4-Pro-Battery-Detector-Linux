@@ -8,6 +8,7 @@ import qs.components
 import qs.components.containers
 import qs.components.controls
 import qs.services
+import qs.utils
 
 Item {
     id: root
@@ -55,11 +56,45 @@ Item {
         clip: true // keep tab content from bleeding past the window edge at small sizes
 
         Row {
+            id: batteryIndicator
+
+            visible: KrakenBattery.available
+            anchors.right: parent.right
+            anchors.verticalCenter: tabsRow.verticalCenter
+            anchors.rightMargin: Tokens.padding.large
+            spacing: Tokens.spacing.small / 2
+
+            MaterialIcon {
+                fontStyle: Tokens.font.icon.medium
+                text: Icons.getBatteryIcon(KrakenBattery.percentage / 100, KrakenBattery.charging)
+                fill: 1
+                color: {
+                    if (KrakenBattery.percentage <= 10)
+                        return "#f44336";
+                    if (KrakenBattery.percentage <= 20)
+                        return "#ff9800";
+                    return Colours.palette.m3onSurfaceVariant;
+                }
+            }
+
+            StyledText {
+                text: `${KrakenBattery.percentage}%`
+                font: Tokens.font.body.medium
+                color: Colours.palette.m3onSurfaceVariant
+            }
+        }
+
+        Row {
             id: tabsRow
 
+            // Centred within the space to the left of the battery
+            // indicator, not the full width -- otherwise the two overlap
+            // at the window's default/minimum size.
+            readonly property real reserved: batteryIndicator.visible ? batteryIndicator.width + Tokens.padding.large * 2 : 0
+
             anchors.top: parent.top
-            anchors.horizontalCenter: parent.horizontalCenter
             anchors.topMargin: Tokens.padding.large
+            x: (parent.width - reserved - width) / 2
             spacing: Tokens.spacing.small
 
             Repeater {

@@ -15,6 +15,18 @@ Item {
 
     property color pendingColour: KrakenRGB.current
 
+    // Picking on the wheel breaks the initial binding above (it's a plain
+    // property, not read-only) -- resync whenever the real current color
+    // changes for any reason (preset click, restore, an external CLI call),
+    // so the preview doesn't get stuck showing a stale unapplied pick.
+    Connections {
+        target: KrakenRGB
+
+        function onCurrentChanged(): void {
+            root.pendingColour = KrakenRGB.current;
+        }
+    }
+
     readonly property var swatches: [
         { r: 255, g: 0, b: 0 },
         { r: 255, g: 165, b: 0 },
