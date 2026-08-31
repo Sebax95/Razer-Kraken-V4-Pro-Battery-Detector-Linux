@@ -9,6 +9,17 @@ Usage:
   kraken lights restore   # re-applies the last state (color or off) as-is
   kraken eq <preset>      # game | movie | music | custom | 0x.. (raw byte)
   kraken eq status [--json]
+  kraken mic monitor <on|off>       # mic monitoring ("tono local")
+  kraken mic monitor-volume <0-15>
+  kraken balance <0-20>               # Game-Chat crossfade (0=game, 20=chat)
+  kraken volume [chat|game] <0-100>  # sets PipeWire's software level for
+                                      # that mix-input (game if omitted),
+                                      # and makes it the active output
+  kraken volume master [chat|game] <0-100>  # sets the REAL device gain for
+                                      # that mix-input (ALSA, no root needed)
+  kraken volume status [--json]      # active output + both volumes for both
+  kraken output <chat|game>          # switches the active output without
+                                      # touching any volume
   kraken watch            # polls the EQ preset and notifies on change
                            # (the only way to catch the physical preset
                            # button -- see the "eq" section below)
@@ -440,6 +451,453 @@ def cmd_eq(argv):
 
 
 # =============================================================================
+# mic
+# =============================================================================
+"""Control the Razer Kraken V4 Pro's microphone monitoring (dock/RF path only).
+
+Captured from Synapse with usbmon (2026-08-28), same 64-byte report-0x02
+family as battery/EQ, two more commands in it:
+
+    CC=0x98  monitoring on/off   -- payload `01 EE 00 00`, EE = 1 on / 0 off
+    CC=0x99  monitoring volume   -- payload `01 VV 00 00`, VV = 0-15 (matches
+                                     Synapse's 0-15 slider range)
+
+Both ack the same way as EQ's SET (`CC 01 | 01 00 00 00`).
+
+Mic mute (the main on/off toggle) and mic volume (0-100) do NOT go through
+this channel -- mute is a separate 1-byte HID SET_REPORT-shaped control
+transfer (`bmRequestType=0x21 bRequest=0x01 wValue=0x0100 wIndex=0x0200`,
+payload `01`=muted/`00`=unmuted) that hidraw's plain write()/HIDIOCSFEATURE
+can't send (wrong bRequest for a standard SET_REPORT), and volume looks like
+a normal USB Audio Class Feature Unit SET_CUR. Neither is implemented here
+yet -- would need raw USBDEVFS_CONTROL access, not just hidraw.
+"""
+
+MIC_MONITOR_CC = 0x98
+MIC_MONITOR_VOLUME_CC = 0x99
+
+
+def _mic_send(fd, cc, value):
+    buf = bytearray(64)
+    payload = bytes.fromhex("02006000000005000080") + bytes([cc, 0x00, 0x01, value, 0x00, 0x00])
+    buf[0:len(payload)] = payload
+    os.write(fd, bytes(buf))
+
+
+def cmd_mic(argv):
+    if len(argv) not in (1, 2) or argv[0] not in ("monitor", "monitor-volume"):
+        print("Usage: kraken mic monitor <on|off> | monitor-volume <0-15>", file=sys.stderr)
+        return 1
+
+    node = find_dock_node()
+    if node is None:
+        print("Kraken V4 Pro (dock, if04) no encontrado.", file=sys.stderr)
+        return 1
+
+    if argv[0] == "monitor":
+        if len(argv) != 2 or argv[1] not in ("on", "off"):
+            print("Usage: kraken mic monitor <on|off>", file=sys.stderr)
+            return 1
+        fd = os.open(node, os.O_RDWR)
+        try:
+            _mic_send(fd, MIC_MONITOR_CC, 1 if argv[1] == "on" else 0)
+        finally:
+            os.close(fd)
+        print(f"Mic monitor: {argv[1]}")
+        return 0
+
+    # monitor-volume
+    if len(argv) != 2:
+        print("Usage: kraken mic monitor-volume <0-15>", file=sys.stderr)
+        return 1
+    try:
+        vol = int(argv[1])
+    except ValueError:
+        print(f"Volumen inválido: {argv[1]!r}", file=sys.stderr)
+        return 1
+    if not (0 <= vol <= 15):
+        print("El volumen de monitorización va de 0 a 15.", file=sys.stderr)
+        return 1
+    fd = os.open(node, os.O_RDWR)
+    try:
+        _mic_send(fd, MIC_MONITOR_VOLUME_CC, vol)
+    finally:
+        os.close(fd)
+    print(f"Mic monitor volume: {vol}")
+    return 0
+
+
+# =============================================================================
+# balance
+# =============================================================================
+"""Set the on-device Game-Chat balance mix (Synapse's "EQUILIBRIO
+JUEGO-CHAT" slider).
+
+Captured from Synapse with usbmon (2026-08-29) via the landmark technique
+(EQ-preset clicks before/after), same 64-byte report-0x02 channel as
+RGB/EQ/mic:
+
+    CC=0xdc, payload = 01 VV 00 00      (VV = 0x00-0x14, i.e. 0-20 decimal)
+    20 = full "MÁS CHAT" (left extreme)
+    0  = full "MÁS JUEGO" (right extreme)
+    10 = centered/balanced
+
+This is a single device-side crossfade between whatever's currently on the
+Chat and Game mix inputs (see the "volume"/"output" section above for
+those) -- not a per-app router. Whichever is favored gets faded up toward
+its own configured level, the other faded down, not just muted.
+"""
+
+BALANCE_CC = 0xdc
+
+
+def cmd_balance(argv):
+    if len(argv) != 1:
+        print("Usage: kraken balance <0-20>  (0=más juego, 20=más chat, 10=centrado)", file=sys.stderr)
+        return 1
+    try:
+        value = int(argv[0])
+    except ValueError:
+        print(f"Valor inválido: {argv[0]!r}", file=sys.stderr)
+        return 1
+    if not (0 <= value <= 20):
+        print("El balance va de 0 (más juego) a 20 (más chat).", file=sys.stderr)
+        return 1
+
+    node = find_dock_node()
+    if node is None:
+        print("Kraken V4 Pro (dock, if04) no encontrado.", file=sys.stderr)
+        return 1
+
+    fd = os.open(node, os.O_RDWR)
+    try:
+        _mic_send(fd, BALANCE_CC, value)
+    finally:
+        os.close(fd)
+    print(f"Balance juego-chat: {value}/20")
+    return 0
+
+
+# =============================================================================
+# volume / output
+# =============================================================================
+"""Set levels for the Kraken V4 Pro's two independent mix inputs, through
+PipeWire, and pick which one is the active output.
+
+This device exposes two independent USB Audio playback interfaces, "Game"
+and "Chat" (PipeWire sink suffixes `...playback.1.0` and `...playback.0.0`
+respectively -- both are misleadingly named "..._Chat_Razer_..." at the
+PipeWire level, only the trailing index tells them apart), each its own
+separate mix *input* feeding an on-device Game-Chat balance mixer (Synapse's
+"EQUILIBRIO JUEGO-CHAT" slider: centered = both audible, either extreme =
+only that one, in between a lerp of the two). "Game" is meant for general
+listening, "Chat" for something like a Discord call.
+
+`kraken volume [chat|game] <0-100>` sets PipeWire's own SOFTWARE gain for
+that sink (defaults to "game" if omitted, for backward compatibility) and
+makes it the active output. This is layered on top of the device's own real
+hardware gain (`kraken volume master`) -- lowering one does not affect the
+other, confirmed by ear 2026-08-31.
+
+`kraken output <chat|game>` just switches which sink is active, without
+touching any volume -- useful since PipeWire/ACP tends to reset the default
+sink back to Chat on its own (a reconnect, reboot, or Synapse re-pair).
+"""
+
+_OUTPUT_SINK_SUFFIX = {"chat": "playback.0.0", "game": "playback.1.0"}
+_OUTPUT_ALSA_INDEX = {"chat": 0, "game": 1}
+
+
+def _find_kraken_sink(target):
+    suffix = _OUTPUT_SINK_SUFFIX[target]
+    try:
+        out = subprocess.run(["pactl", "list", "short", "sinks"], capture_output=True, text=True, check=True).stdout
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        return None
+    for line in out.splitlines():
+        parts = line.split("\t")
+        if len(parts) >= 2 and "Kraken" in parts[1] and parts[1].endswith(suffix):
+            return parts[1]
+    return None
+
+
+def cmd_output(argv):
+    if len(argv) != 1 or argv[0] not in _OUTPUT_SINK_SUFFIX:
+        print("Usage: kraken output <chat|game>", file=sys.stderr)
+        return 1
+    sink = _find_kraken_sink(argv[0])
+    if sink is None:
+        print(f"No se encontró la interfaz de audio '{argv[0]}' del Kraken (¿está conectado?).", file=sys.stderr)
+        return 1
+    subprocess.run(["pactl", "set-default-sink", sink], check=False)
+    print(f"Output activo: {argv[0]}")
+    return 0
+
+
+def _pactl_sink_volume_pct(sink):
+    result = subprocess.run(["pactl", "get-sink-volume", sink], capture_output=True, text=True)
+    if result.returncode != 0:
+        return None
+    for line in result.stdout.splitlines():
+        if "%" not in line:
+            continue
+        try:
+            return int(line.split("/")[1].strip().rstrip("%"))
+        except (IndexError, ValueError):
+            return None
+    return None
+
+
+def _alsa_pcm_pct(card, index):
+    # Reads back the dB value (not ALSA's own "[XX%]", which is linear in
+    # dB) and runs it through the SAME curve `cmd_volume_master` uses to
+    # set it, via `_db_to_percent` -- otherwise the percent shown here
+    # wouldn't match the percent that was actually asked for. See the
+    # "master" section's curve comment for why.
+    result = subprocess.run(["amixer", "-c", str(card), "sget", f"PCM,{index}"], capture_output=True, text=True)
+    if result.returncode != 0:
+        return None
+    for line in result.stdout.splitlines():
+        for chunk in line.split("["):
+            close = chunk.find("]")
+            if close == -1 or not chunk[:close].endswith("dB"):
+                continue
+            try:
+                return _db_to_percent(float(chunk[:close - 2]))
+            except ValueError:
+                continue
+    return None
+
+
+def cmd_volume_status(argv):
+    as_json = "--json" in argv
+
+    default_sink = subprocess.run(["pactl", "get-default-sink"], capture_output=True, text=True).stdout.strip()
+    output = None
+    for target, suffix in _OUTPUT_SINK_SUFFIX.items():
+        if default_sink.endswith(suffix):
+            output = target
+            break
+
+    pipewire = {}
+    for target in _OUTPUT_SINK_SUFFIX:
+        sink = _find_kraken_sink(target)
+        pipewire[target] = _pactl_sink_volume_pct(sink) if sink else None
+
+    card = _find_kraken_alsa_card()
+    master = {}
+    for target, index in _OUTPUT_ALSA_INDEX.items():
+        master[target] = _alsa_pcm_pct(card, index) if card is not None else None
+
+    info = {"output": output, "pipewire": pipewire, "master": master}
+    if as_json:
+        print(json.dumps(info))
+    else:
+        print(f"Output activo: {output}")
+        print(f"PipeWire   -- chat: {pipewire['chat']}%  game: {pipewire['game']}%")
+        print(f"Real(ALSA) -- chat: {master['chat']}%  game: {master['game']}%")
+    return 0
+
+
+def cmd_volume(argv):
+    if argv[:1] == ["master"]:
+        return cmd_volume_master(argv[1:])
+    if argv[:1] == ["status"]:
+        return cmd_volume_status(argv[1:])
+    target = "game"
+    rest = argv
+    if argv[:1] and argv[0] in _OUTPUT_SINK_SUFFIX:
+        target = argv[0]
+        rest = argv[1:]
+    if len(rest) != 1:
+        print("Usage: kraken volume [chat|game] <0-100> | master [chat|game] <0-100>", file=sys.stderr)
+        return 1
+    try:
+        pct = int(rest[0])
+    except ValueError:
+        print(f"Volumen inválido: {rest[0]!r}", file=sys.stderr)
+        return 1
+    if not (0 <= pct <= 100):
+        print("El volumen va de 0 a 100.", file=sys.stderr)
+        return 1
+
+    sink = _find_kraken_sink(target)
+    if sink is None:
+        print(f"No se encontró la interfaz de audio '{target}' del Kraken (¿está conectado?).", file=sys.stderr)
+        return 1
+
+    subprocess.run(["pactl", "set-default-sink", sink], check=False)
+    subprocess.run(["pactl", "set-sink-volume", sink, f"{pct}%"], check=False)
+    print(f"PipeWire volume ({target} sink): {pct}% -- separate from the real device gain, see 'kraken volume master'")
+    return 0
+
+
+# --- master (real on-device volume, via ALSA) -------------------------------
+"""kraken volume master <0-100>
+
+The device's real, overall output gain -- what the headset itself actually
+plays at, as opposed to the "Game"/"Chat" PCM levels above (which are each
+one *input* to the device's own internal Game-Chat balance mixer, not the
+final output stage).
+
+**2026-08-29/31: this was wrongly assumed unreachable without raw USB for
+most of a day.** The device's USB descriptor declares TWO separate
+AudioControl domains: interface 0's (covering streams 1,2 -- Mic + "Chat")
+and interface 5's own independent one (covering stream 6 -- "Game"), each
+with its own Feature Unit (entity 5 for Chat, entity 8 for Game/master).
+Both turned out to already be fully exposed by `snd-usb-audio` as completely
+ordinary ALSA simple-mixer controls -- `amixer -c N scontrols` shows them as
+`'PCM',0` (Chat/entity 5) and `'PCM',1` (Game/entity 8) -- no raw ioctls, no
+driver detach, no root, ever needed. What actually happened: earlier
+sessions kept testing through `kraken volume`/PipeWire, which applies its
+own *separate software* gain stage on top of these ALSA hardware controls
+and normally leaves them wherever they last were -- so the real hardware
+gain looked "stuck low" when it was PipeWire's own volume that was low (or
+the default sink had silently reverted to Chat, see `kraken volume`'s
+docstring), not because the hardware control was unreachable. Confirmed live
+2026-08-31: raising/lowering ONLY the ALSA `'PCM',1` control changes real
+perceived loudness with PipeWire's own volume held constant, and vice versa
+-- they are genuinely two independent knobs, exactly like Windows'
+Synapse-volume-slider vs Windows-OS-volume.
+
+The whole raw-USB/driver-detach saga from earlier this session (interface
+1.5 ioctl dance, sysfs unbind/bind of one or all sibling interfaces, the
+kernel `mixer_maps` quirk idea) is now known to have been solving an
+already-solved problem the hard way. Kept in git history for the protocol
+research (the dB curve/mute-command notes are still accurate, just not
+needed to reach this from Linux) but removed from the working tree.
+"""
+
+
+def _find_kraken_alsa_card():
+    try:
+        with open("/proc/asound/cards") as f:
+            text = f.read()
+    except OSError:
+        return None
+    for line in text.splitlines():
+        if "Kraken" not in line or "[" not in line:
+            continue
+        index = line.split("[", 1)[0].strip()
+        if index.isdigit():
+            return int(index)
+    return None
+
+
+# ALSA's own 0-100% here is LINEAR in dB (confirmed: 50% always lands
+# exactly halfway between the control's min/max dB) -- but dB is already a
+# log scale, so a straight line in dB is exponential in perceived loudness,
+# which is why the low end of the range feels like "almost nothing changes"
+# and the top ~20% feels like it does all the work. Synapse's own volume
+# slider does NOT do this -- captured from real hardware traffic
+# (2026-08-29, see the "master" section history) it uses a curve that's
+# steeper at the bottom and flatter at the top, so each % step feels roughly
+# even by ear. Reusing that curve here instead of ALSA's naive percent.
+_MASTER_VOLUME_CURVE = [(3, -49.93), (50, -10.42), (100, 0.0)]
+_ALSA_MIN_DB = -74.0
+_ALSA_MAX_DB = 0.0
+
+
+def _percent_to_db(pct):
+    points = _MASTER_VOLUME_CURVE
+    if pct <= 0:
+        return _ALSA_MIN_DB
+    if pct <= points[0][0]:
+        t = pct / points[0][0]
+        return _ALSA_MIN_DB + t * (points[0][1] - _ALSA_MIN_DB)
+    if pct >= points[-1][0]:
+        return points[-1][1]
+    for (p0, db0), (p1, db1) in zip(points, points[1:]):
+        if p0 <= pct <= p1:
+            t = (pct - p0) / (p1 - p0)
+            return db0 + t * (db1 - db0)
+    return points[-1][1]  # unreachable, keeps the type checker happy
+
+
+def _db_to_percent(db):
+    """Inverse of `_percent_to_db`, for reading a raw dB value back as the
+    same curved percentage it would take to set it (see `_alsa_pcm_pct`)."""
+    points = _MASTER_VOLUME_CURVE
+    if db <= _ALSA_MIN_DB:
+        return 0
+    if db <= points[0][1]:
+        t = (db - _ALSA_MIN_DB) / (points[0][1] - _ALSA_MIN_DB)
+        return round(t * points[0][0])
+    if db >= points[-1][1]:
+        return 100
+    for (p0, db0), (p1, db1) in zip(points, points[1:]):
+        if db0 <= db <= db1:
+            t = (db - db0) / (db1 - db0)
+            return round(p0 + t * (p1 - p0))
+    return 100  # unreachable, keeps the type checker happy
+
+
+def _alsa_raw_range(card, index):
+    result = subprocess.run(["amixer", "-c", str(card), "sget", f"PCM,{index}"], capture_output=True, text=True)
+    if result.returncode != 0:
+        return None
+    for line in result.stdout.splitlines():
+        if "Limits:" not in line:
+            continue
+        parts = line.split()
+        try:
+            return int(parts[-3]), int(parts[-1])
+        except (IndexError, ValueError):
+            return None
+    return None
+
+
+def _db_to_raw(db, min_raw, max_raw):
+    db = max(_ALSA_MIN_DB, min(_ALSA_MAX_DB, db))
+    t = (db - _ALSA_MIN_DB) / (_ALSA_MAX_DB - _ALSA_MIN_DB)
+    return round(min_raw + t * (max_raw - min_raw))
+
+
+def cmd_volume_master(argv):
+    target = "game"
+    rest = argv
+    if argv[:1] and argv[0] in _OUTPUT_ALSA_INDEX:
+        target = argv[0]
+        rest = argv[1:]
+    if len(rest) != 1:
+        print("Usage: kraken volume master [chat|game] <0-100>", file=sys.stderr)
+        return 1
+    try:
+        pct = int(rest[0])
+    except ValueError:
+        print(f"Volumen inválido: {rest[0]!r}", file=sys.stderr)
+        return 1
+    if not (0 <= pct <= 100):
+        print("El volumen va de 0 a 100.", file=sys.stderr)
+        return 1
+
+    card = _find_kraken_alsa_card()
+    if card is None:
+        print("Kraken V4 Pro no encontrado en ALSA.", file=sys.stderr)
+        return 1
+
+    index = _OUTPUT_ALSA_INDEX[target]
+    raw_range = _alsa_raw_range(card, index)
+    if raw_range is None:
+        print(f"No pude leer el rango del control 'PCM,{index}'.", file=sys.stderr)
+        return 1
+    min_raw, max_raw = raw_range
+    raw = _db_to_raw(_percent_to_db(pct), min_raw, max_raw)
+
+    result = subprocess.run(
+        ["amixer", "-c", str(card), "cset", f"name=PCM Playback Volume,index={index}", f"{raw},{raw}"],
+        capture_output=True, text=True,
+    )
+    if result.returncode != 0:
+        print(f"amixer falló: {result.stderr.strip()}", file=sys.stderr)
+        return 1
+    print(f"Master volume (real, ALSA 'PCM',{index} / {target}): {pct}%")
+    return 0
+
+
+
+
+# =============================================================================
 # watch
 # =============================================================================
 """Poll the Kraken V4 Pro's current EQ preset and notify on change.
@@ -508,6 +966,10 @@ COMMANDS = {
     "battery": cmd_battery,
     "lights": cmd_lights,
     "eq": cmd_eq,
+    "mic": cmd_mic,
+    "balance": cmd_balance,
+    "volume": cmd_volume,
+    "output": cmd_output,
     "watch": cmd_watch,
 }
 
