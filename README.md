@@ -207,6 +207,11 @@ the bottom ~70% of the range feel like almost nothing changes and the last
 (captured from live hardware traffic: 3%→-49.93dB, 50%→-10.42dB,
 100%→0dB), so each step feels roughly even by ear.
 
+Both sinks show up in PipeWire with unhelpful names by default ("Razer
+Kraken V4 Pro" and "Razer Kraken V4 Pro (USB Audio #1)") — see
+[`examples/wireplumber/`](examples/wireplumber/) for a config that renames
+them to "Kraken V4 Pro (Chat)"/"(Game)" in any output picker.
+
 `kraken balance <0-20>` sets the on-device Game-Chat crossfade (Synapse's
 "EQUILIBRIO JUEGO-CHAT" slider) — `0` = full Game, `20` = full Chat, `10` =
 centered. Same safe HID report channel as RGB/EQ/mic, no ALSA/root needed.
