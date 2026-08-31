@@ -176,9 +176,64 @@ button alone. `kraken watch` works around this by actively polling
 [`examples/systemd/`](examples/systemd/) for the service unit that runs it
 continuously.
 
+## Volume, output, and balance
+
+This device exposes two independent USB Audio playback interfaces, "Game"
+and "Chat" (matching Synapse's own naming) — each one an *input* to an
+on-device Game-Chat balance mixer, not two separate physical outputs. Each
+one has both a PipeWire-side software volume and its own real hardware
+gain, controllable independently:
+
+```
+$ kraken output game               # switch the active output, no volume change
+$ kraken volume game 40            # PipeWire's own software level (0-100)
+$ kraken volume master game 75     # the device's REAL gain (0-100, needs amixer)
+$ kraken volume status --json
+{"output": "game", "pipewire": {"chat": 50, "game": 40}, "master": {"chat": 100, "game": 75}}
+```
+
+`chat`/`game` is optional on `volume`/`volume master` and defaults to
+`game`. `volume master` needs `amixer` (`alsa-utils`) — everything else
+here only needs `pactl`.
+
+Both ALSA controls (`'PCM',0` for Chat, `'PCM',1` for Game — check
+`amixer -c N scontrols` if your build gives them different names/indices)
+were already exposed by the kernel's own `snd-usb-audio` driver the whole
+time; no root or raw USB access is needed. `volume master` doesn't use
+`amixer`'s own linear percentage, though — that's linear *in dB*, which is
+exponential in perceived loudness (dB is already a log scale), so it makes
+the bottom ~70% of the range feel like almost nothing changes and the last
+~20% do all the work. It uses Synapse's own real percent→dB curve instead
+(captured from live hardware traffic: 3%→-49.93dB, 50%→-10.42dB,
+100%→0dB), so each step feels roughly even by ear.
+
+`kraken balance <0-20>` sets the on-device Game-Chat crossfade (Synapse's
+"EQUILIBRIO JUEGO-CHAT" slider) — `0` = full Game, `20` = full Chat, `10` =
+centered. Same safe HID report channel as RGB/EQ/mic, no ALSA/root needed.
+This crossfades between whatever's currently feeding each mix input,
+scaled by each one's own volume above — it doesn't route specific apps to
+Chat vs Game on its own.
+
+## Mic monitoring
+
+```
+$ kraken mic monitor on             # sidetone ("tono local"), on/off
+$ kraken mic monitor-volume 8       # 0-15, matches Synapse's own slider range
+```
+
+Dock/RF only, same 64-byte report family as everything above. Mic mute and
+mic capture volume (the main ones, not sidetone) aren't implemented — see
+the `kraken` script's "mic" section docstring for why.
+
 ## Notes
 
-- Python 3 standard library only, no dependencies.
+- Python 3 standard library only, no pip packages -- but a few subcommands
+  shell out to external tools that must be installed separately:
+  `kraken volume`/`kraken output` need `pactl` (PipeWire or PulseAudio),
+  `kraken volume master` needs `amixer` (the `alsa-utils` package), and
+  `kraken watch` needs `notify-send` (`libnotify`). Everything else
+  (battery/lights/eq/mic/balance) has no extra dependency beyond the udev
+  rule above.
 - The script tries the wired headset first, then the dock (RF).
 - Battery reporting resolution is 1%; expect the first drop from 100% to take a
   while (the headset runs tens of hours per charge).
