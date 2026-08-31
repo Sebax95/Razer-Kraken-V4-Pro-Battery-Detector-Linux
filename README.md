@@ -208,9 +208,35 @@ the bottom ~70% of the range feel like almost nothing changes and the last
 100%→0dB), so each step feels roughly even by ear.
 
 Both sinks show up in PipeWire with unhelpful names by default ("Razer
-Kraken V4 Pro" and "Razer Kraken V4 Pro (USB Audio #1)") — see
-[`examples/wireplumber/`](examples/wireplumber/) for a config that renames
-them to "Kraken V4 Pro (Chat)"/"(Game)" in any output picker.
+Kraken V4 Pro" and "Razer Kraken V4 Pro (USB Audio #1)") — drop this into
+`~/.config/wireplumber/wireplumber.conf.d/51-razer-kraken.conf` and
+`systemctl --user restart wireplumber` to rename them to "Kraken V4 Pro
+(Chat)"/"(Game)" in any output picker:
+
+```conf
+# Expose both ALSA PCM subdevices (Chat + Game) instead of letting
+# alsa-card-profile (ACP) collapse them into one profile that only binds
+# to Chat, and give each a readable name.
+monitor.alsa.rules = [
+  {
+    matches = [{ device.vendor.id = "0x1532", device.product.id = "0x0568" }]
+    actions = { update-props = { api.alsa.use-acp = false } }
+  }
+  {
+    matches = [{ node.name = "alsa_output.usb-Razer_Kraken_V4_Pro_-_Chat_Razer_Kraken_V4_Pro-00.playback.0.0" }]
+    actions = { update-props = { node.description = "Kraken V4 Pro (Chat)", node.nick = "Kraken V4 Pro (Chat)" } }
+  }
+  {
+    matches = [{ node.name = "alsa_output.usb-Razer_Kraken_V4_Pro_-_Chat_Razer_Kraken_V4_Pro-00.playback.1.0" }]
+    actions = { update-props = { node.description = "Kraken V4 Pro (Game)", node.nick = "Kraken V4 Pro (Game)" } }
+  }
+]
+```
+
+If `pactl list sinks` shows different `node.name`s on your setup (different
+card index, different USB port), edit the two `matches` above to match —
+only the `.playback.0.0`/`.playback.1.0` suffix (Chat/Game) actually
+matters.
 
 `kraken balance <0-20>` sets the on-device Game-Chat crossfade (Synapse's
 "EQUILIBRIO JUEGO-CHAT" slider) — `0` = full Game, `20` = full Chat, `10` =
