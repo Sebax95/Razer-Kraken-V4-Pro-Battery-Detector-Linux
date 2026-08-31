@@ -18,6 +18,7 @@ Item {
     property int tabIndex: 0
 
     readonly property var tabs: [
+        { label: qsTr("General"), icon: "tune" },
         { label: qsTr("Lights"), icon: "lightbulb" },
         { label: qsTr("Equalizer"), icon: "equalizer" },
         { label: qsTr("Haptics"), icon: "vibration", wip: true },
@@ -216,7 +217,15 @@ Item {
                     const tab = root.tabs[root.tabIndex];
                     if (tab.wip)
                         return wipComp;
-                    return root.tabIndex === 0 ? lightsComp : eqComp;
+                    if (root.tabIndex === 0)
+                        return generalComp;
+                    return root.tabIndex === 1 ? lightsComp : eqComp;
+                }
+
+                Component {
+                    id: generalComp
+
+                    KrakenGeneralTab {}
                 }
 
                 Component {

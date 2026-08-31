@@ -6,8 +6,9 @@ a headphones icon in the status column that turns orange at ≤20% and red at
 ≤10%, with a bolt badge while charging and a check-circle badge once fully
 charged via cable. Hovering opens a Synapse-style popout (progress ring,
 percentage, "Controls" button); clicking it opens a floating window with
-Lights, Equalizer, and placeholder tabs for Haptics/Microphone/THX. The
-window's border and close-button notch use Caelestia's native Blob metaball
+General (volume), Lights, Equalizer, and placeholder tabs for
+Haptics/Microphone/THX. The window's border and close-button notch use
+Caelestia's native Blob metaball
 system (the same one Nexus/Settings uses), and every color pulls from
 `Colours.palette.*` theme tokens, so it stays live-reactive to whatever
 scheme you're running — no hardcoded hex, no restart needed on a scheme
@@ -36,6 +37,10 @@ Requires `kraken` installed at `~/.local/bin/kraken` (see the main README).
   outside this app changed it)
 - `KrakenEQ.qml` → copy to `services/` (singleton that polls
   `kraken eq status --json` and fire-and-forgets preset changes)
+- `KrakenVolume.qml` → copy to `services/` (singleton wrapping
+  `kraken volume`/`volume master`/`output`/`balance`; polls
+  `kraken volume status --json` every 5s to catch changes made outside the
+  app)
 - `Kraken.qml` → copy to `modules/bar/popouts/` (the hover popout — battery
   ring plus a "Controls" button that opens the window below)
 - `KrakenControlWindowFactory.qml` → copy to `modules/bar/popouts/` (the
@@ -43,6 +48,9 @@ Requires `kraken` installed at `~/.local/bin/kraken` (see the main README).
 - `KrakenControlWindow.qml` → copy to `modules/bar/popouts/` (tabs, a
   battery icon + percentage next to them, the Blob-based border/notch,
   tab-switch fade+slide animation)
+- `KrakenGeneralTab.qml` → copy to `modules/bar/popouts/` (Chat/Game
+  PipeWire volume, one "Real (device)" slider that follows the active
+  output, and the game-chat balance track)
 - `KrakenLightsTab.qml` → copy to `modules/bar/popouts/` (presets, custom
   colour wheel, effects chips, on/off toggle)
 - `KrakenEqTab.qml` → copy to `modules/bar/popouts/` (EQ preset grid)
