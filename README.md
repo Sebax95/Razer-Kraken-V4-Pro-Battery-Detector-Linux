@@ -21,7 +21,9 @@ EQ: Movie
 ```
 
 The `--json` output is meant for status bars and scripts (waybar, quickshell,
-polybar…); on failure it prints `{"error": "..."}` and exits non-zero. See
+polybar…); on failure it prints `{"error": "..."}` and exits non-zero (with
+`"dock_silent": true` when the dock is plugged in but sends nothing back --
+commands still reach the headset in that state, only replies are lost). See
 [`examples/caelestia/`](examples/caelestia/) for a ready-made bar widget for
 the Caelestia shell (icon + Synapse-style popout with instant plug/unplug
 updates, plus color swatches and an on/off toggle), and

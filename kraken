@@ -112,9 +112,9 @@ def _battery_query(node, target, cmdid):
     return None
 
 
-def _battery_fail(as_json, message):
+def _battery_fail(as_json, message, **extra):
     if as_json:
-        print(json.dumps({"error": message}))
+        print(json.dumps({"error": message, **extra}))
     else:
         print(message, file=sys.stderr)
     return 1
@@ -129,6 +129,10 @@ def cmd_battery(argv):
 
     # Query directly while the cable is plugged in; otherwise via the dock (RF).
     attempts = [(n, 0x00, "cable") for n in wired] + [(n, 0x80, "dock/RF") for n in dock]
+    # A healthy dock always answers (0xff = no RF link). One that is plugged in
+    # but sends nothing back still forwards commands to the headset, so report
+    # it separately: callers can keep their controls reachable.
+    dock_silent = bool(dock)
     for node, target, via in attempts:
         try:
             level = _battery_query(node, target, CMD_BATTERY)
@@ -137,6 +141,8 @@ def cmd_battery(argv):
             continue
         except OSError:
             continue
+        if level == 0xFF:
+            dock_silent = False
         if level is None or level == 0xFF:
             continue  # the dock answers 0xff when it has no RF link to the headset
         try:
@@ -150,7 +156,8 @@ def cmd_battery(argv):
             print(f"Battery: {level}% ({state}, via {via})")
         return 0
 
-    return _battery_fail(as_json, "The headset did not respond (powered off or out of dock range?).")
+    return _battery_fail(as_json, "The headset did not respond (powered off or out of dock range?).",
+                         dock_silent=dock_silent)
 
 
 # =============================================================================

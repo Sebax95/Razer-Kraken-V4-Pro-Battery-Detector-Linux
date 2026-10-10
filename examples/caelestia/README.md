@@ -67,7 +67,8 @@ Add a loader after the existing battery icon:
 // Headset battery icon (Razer Kraken V4 Pro)
 WrappedLoader {
     name: "krakenbattery"
-    active: KrakenBattery.available
+    // present = battery known, or dock plugged in but not answering
+    active: KrakenBattery.present
 
     sourceComponent: Item {
         implicitWidth: headsetIcon.implicitWidth
@@ -79,6 +80,8 @@ WrappedLoader {
             animate: true
             text: "headphones"
             color: {
+                if (!KrakenBattery.available)
+                    return root.colour;
                 if (KrakenBattery.percentage <= 10)
                     return "#f44336";
                 if (KrakenBattery.percentage <= 20)
@@ -94,7 +97,7 @@ WrappedLoader {
 
             readonly property bool fullyCharged: KrakenBattery.via === "cable" && KrakenBattery.percentage >= 100
 
-            visible: KrakenBattery.charging || fullyCharged
+            visible: KrakenBattery.available && (KrakenBattery.charging || fullyCharged)
 
             anchors.right: parent.right
             anchors.bottom: parent.bottom

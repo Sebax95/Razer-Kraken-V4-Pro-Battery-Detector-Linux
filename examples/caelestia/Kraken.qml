@@ -10,6 +10,8 @@ Column {
     id: root
 
     readonly property color levelColour: {
+        if (!KrakenBattery.available)
+            return Colours.palette.m3outline;
         if (KrakenBattery.percentage <= 10)
             return "#f44336";
         if (KrakenBattery.percentage <= 20)
@@ -29,7 +31,7 @@ Column {
             id: ring
 
             implicitSize: 80
-            value: KrakenBattery.percentage / 100
+            value: KrakenBattery.available ? KrakenBattery.percentage / 100 : 0
             fgColour: root.levelColour
 
             Behavior on clampedVal {
@@ -52,7 +54,7 @@ Column {
             anchors.top: parent.top
             anchors.right: parent.right
 
-            visible: KrakenBattery.charging || fullyCharged
+            visible: KrakenBattery.available && (KrakenBattery.charging || fullyCharged)
             implicitWidth: boltIcon.implicitHeight + Tokens.padding.extraSmall * 2
             implicitHeight: boltIcon.implicitHeight + Tokens.padding.extraSmall * 2
             radius: Tokens.rounding.full
@@ -72,7 +74,7 @@ Column {
     StyledText {
         anchors.horizontalCenter: parent.horizontalCenter
 
-        text: `${KrakenBattery.percentage}%`
+        text: KrakenBattery.available ? `${KrakenBattery.percentage}%` : qsTr("Battery unknown")
         font: Tokens.font.body.builders.medium.weight(Font.Medium).build()
         color: root.levelColour
     }

@@ -11,6 +11,10 @@ Singleton {
     readonly property int percentage: _percentage
     readonly property bool charging: _charging
     readonly property string via: _via
+    // Dock plugged in but not answering queries: commands still reach the
+    // headset, only the battery level is unknown.
+    readonly property bool dockSilent: _dockSilent
+    readonly property bool present: _available || _dockSilent
 
     // Re-applies the last RGB color once the headset comes back online
     // (covers the RF-only power-cycle case, which fires no udev event).
@@ -23,6 +27,7 @@ Singleton {
     property int _percentage: 0
     property bool _charging: false
     property string _via: ""
+    property bool _dockSilent: false
     // tras conectar/desconectar el cable, el auricular tarda unos segundos en
     // re-engancharse por RF al dock: reintentar antes de dar por perdido
     property int _retriesLeft: 0
@@ -34,8 +39,10 @@ Singleton {
         stdout: StdioCollector {
             onStreamFinished: {
                 let ok = false;
+                let silent = false;
                 try {
                     const info = JSON.parse(text);
+                    silent = info.dock_silent === true;
                     if (typeof info.battery === "number") {
                         root._percentage = info.battery;
                         root._charging = !!info.charging;
@@ -44,6 +51,7 @@ Singleton {
                         ok = true;
                     }
                 } catch (e) {}
+                root._dockSilent = silent;
                 if (!ok) {
                     if (root._retriesLeft > 0) {
                         root._retriesLeft--;
