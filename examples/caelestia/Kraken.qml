@@ -10,6 +10,8 @@ Column {
     id: root
 
     readonly property color levelColour: {
+        if (KrakenBattery.linkError)
+            return "#f44336";
         if (!KrakenBattery.available)
             return Colours.palette.m3outline;
         if (KrakenBattery.percentage <= 10)
@@ -40,7 +42,7 @@ Column {
 
             MaterialIcon {
                 anchors.centerIn: parent
-                text: "headphones"
+                text: KrakenBattery.linkError ? "link_off" : "headphones"
                 font: Tokens.font.icon.large
                 color: root.levelColour
             }
@@ -74,9 +76,25 @@ Column {
     StyledText {
         anchors.horizontalCenter: parent.horizontalCenter
 
-        text: KrakenBattery.available ? `${KrakenBattery.percentage}%` : qsTr("Battery unknown")
+        text: {
+            if (KrakenBattery.available)
+                return `${KrakenBattery.percentage}%`;
+            if (KrakenBattery.linkError)
+                return qsTr("Link error");
+            return qsTr("Battery unknown");
+        }
         font: Tokens.font.body.builders.medium.weight(Font.Medium).build()
         color: root.levelColour
+    }
+
+    StyledText {
+        anchors.horizontalCenter: parent.horizontalCenter
+
+        visible: KrakenBattery.linkError
+        text: qsTr("Dock not answering.\nReplug its USB cable.")
+        horizontalAlignment: Text.AlignHCenter
+        font: Tokens.font.body.small
+        color: Colours.palette.m3onSurfaceVariant
     }
 
     IconTextButton {

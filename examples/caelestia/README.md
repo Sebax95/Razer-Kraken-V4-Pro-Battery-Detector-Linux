@@ -80,6 +80,8 @@ WrappedLoader {
             animate: true
             text: "headphones"
             color: {
+                if (KrakenBattery.linkError)
+                    return "#f44336";
                 if (!KrakenBattery.available)
                     return root.colour;
                 if (KrakenBattery.percentage <= 10)
@@ -91,13 +93,14 @@ WrappedLoader {
             fill: 1
         }
 
-        // Bolt badge while charging, check-circle once fully charged via cable
+        // Bolt badge while charging, check-circle once fully charged via
+        // cable, red link-off badge when the dock is plugged in but mute
         StyledRect {
             id: krakenBadge
 
             readonly property bool fullyCharged: KrakenBattery.via === "cable" && KrakenBattery.percentage >= 100
 
-            visible: KrakenBattery.available && (KrakenBattery.charging || fullyCharged)
+            visible: KrakenBattery.linkError || (KrakenBattery.available && (KrakenBattery.charging || fullyCharged))
 
             anchors.right: parent.right
             anchors.bottom: parent.bottom
@@ -114,9 +117,9 @@ WrappedLoader {
 
                 anchors.centerIn: parent
                 fontStyle: Tokens.font.icon.builders.small.scale(0.5).build()
-                text: krakenBadge.fullyCharged ? "check_circle" : "bolt"
+                text: KrakenBattery.linkError ? "link_off" : krakenBadge.fullyCharged ? "check_circle" : "bolt"
                 fill: 1
-                color: krakenBadge.fullyCharged ? "#4caf50" : "#ffc107"
+                color: KrakenBattery.linkError ? "#f44336" : krakenBadge.fullyCharged ? "#4caf50" : "#ffc107"
             }
         }
     }

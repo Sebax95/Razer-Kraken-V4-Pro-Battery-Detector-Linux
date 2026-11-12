@@ -59,7 +59,7 @@ Item {
         Row {
             id: batteryIndicator
 
-            visible: KrakenBattery.available
+            visible: KrakenBattery.available || KrakenBattery.linkError
             anchors.right: parent.right
             anchors.verticalCenter: tabsRow.verticalCenter
             anchors.rightMargin: Tokens.padding.large
@@ -67,9 +67,11 @@ Item {
 
             MaterialIcon {
                 fontStyle: Tokens.font.icon.medium
-                text: Icons.getBatteryIcon(KrakenBattery.percentage / 100, KrakenBattery.charging)
+                text: KrakenBattery.linkError ? "link_off" : Icons.getBatteryIcon(KrakenBattery.percentage / 100, KrakenBattery.charging)
                 fill: 1
                 color: {
+                    if (KrakenBattery.linkError)
+                        return "#f44336";
                     if (KrakenBattery.percentage <= 10)
                         return "#f44336";
                     if (KrakenBattery.percentage <= 20)
@@ -79,9 +81,9 @@ Item {
             }
 
             StyledText {
-                text: `${KrakenBattery.percentage}%`
+                text: KrakenBattery.linkError ? qsTr("Link error") : `${KrakenBattery.percentage}%`
                 font: Tokens.font.body.medium
-                color: Colours.palette.m3onSurfaceVariant
+                color: KrakenBattery.linkError ? "#f44336" : Colours.palette.m3onSurfaceVariant
             }
         }
 

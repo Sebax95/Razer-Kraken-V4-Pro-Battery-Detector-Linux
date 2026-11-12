@@ -15,6 +15,10 @@ Singleton {
     // headset, only the battery level is unknown.
     readonly property bool dockSilent: _dockSilent
     readonly property bool present: _available || _dockSilent
+    // Dock plugged in but mute, with no cable fallback: show a link-error
+    // warning. Replugging the dock's USB (a real power cycle -- a reboot
+    // keeps USB powered) brings it back.
+    readonly property bool linkError: _dockSilent && !_available
 
     // Re-applies the last RGB color once the headset comes back online
     // (covers the RF-only power-cycle case, which fires no udev event).
